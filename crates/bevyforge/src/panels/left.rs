@@ -1,12 +1,12 @@
 //! Left dock: Scene hierarchy (with search, drag-reparent, lock/visibility)
 //! and the Asset Browser (real filesystem of the project).
 
-use egui::{Context, Vec2};
+use egui::Vec2;
 use forge_ipc::{EditorToRuntime, FieldValue};
 
 use crate::app::BevyForgeApp;
 use crate::theme;
-use crate::{panels, state};
+use crate::state;
 
 pub fn hierarchy_panel(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
     egui::Panel::left("scene_panel")

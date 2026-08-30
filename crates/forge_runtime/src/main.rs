@@ -84,7 +84,7 @@ fn main() -> anyhow::Result<()> {
 
     let screenshot_mode = screenshot.clone();
     let init_demo_flag = init_demo;
-    let shot_size = state::ViewportSize { width, height };
+    let _shot_size = state::ViewportSize { width, height };
 
     let mut app = App::new();
     app.add_plugins(

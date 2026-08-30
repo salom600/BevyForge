@@ -12,12 +12,12 @@ use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
 
 use forge_ipc::{
-    ComponentData, ComponentField, ComponentKind, EntityKind, EntityId, FieldRow, FieldValue,
+    ComponentData, ComponentField, ComponentKind, EntityKind, FieldRow, FieldValue,
     HierNode, MeshPrimitive, NodeIcon,
 };
 
 use forge_scripts as scripts;
-use crate::state::{EditorLocked, EditorOnlyTag, UserScene};
+use crate::state::{EditorLocked, UserScene};
 
 // ---------------------------------------------------------------------------
 // Name helpers
@@ -323,6 +323,7 @@ pub fn build_hierarchy(world: &mut World, selected: Option<Entity>) -> Vec<HierN
 // Inspector extraction
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 fn row(label: &str, value: FieldValue, unit: Option<&str>) -> (ComponentField, FieldRow) {
     // The field kind is derived from the value to keep rows self-describing.
     let field = match value {
@@ -653,6 +654,7 @@ pub fn extract_components(world: &mut World, entity: Entity) -> (String, Vec<Com
 }
 
 /// Post a single component row update (helper keeping the `row` fn honest).
+#[allow(dead_code)]
 pub fn make_row(field: ComponentField, label: &str, value: FieldValue, unit: Option<&str>) -> (ComponentField, FieldRow) {
     (field, FieldRow { label: label.to_string(), value, unit: unit.map(|s| s.to_string()) })
 }
@@ -1111,7 +1113,7 @@ pub fn push_selected_components(world: &mut World) {
     use crate::state::{IpcChannels, RuntimeFlags, Selection};
     let flags_ok = {
         let flags = world.resource::<RuntimeFlags>();
-        let selection = world.resource::<Selection>();
+        let _selection = world.resource::<Selection>();
         flags.components_dirty
     };
     if !flags_ok {
@@ -1143,8 +1145,3 @@ pub fn push_selected_components(world: &mut World) {
     });
 }
 
-/// Silence unused warnings for helper kept for future composite rows.
-#[allow(dead_code)]
-fn _unused() {
-    let _ = row("x", FieldValue::F32(0.0), None);
-}

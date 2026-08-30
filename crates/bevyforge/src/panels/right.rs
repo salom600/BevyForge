@@ -1,7 +1,7 @@
 //! Right dock: the Inspector (reflection-equivalent typed component editing)
 //! and the Environment & Lighting panel.
 
-use egui::{Context, Vec2};
+use egui::Vec2;
 use forge_ipc::{
     ComponentData, ComponentField, ComponentKind, EditorToRuntime, FieldValue, MeshPrimitive,
 };
@@ -313,12 +313,6 @@ fn draw_value_editor(
     }
 }
 
-fn value_str(v: &FieldValue) -> &str {
-    match v {
-        FieldValue::Str(s) => s,
-        _ => "",
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Environment & Lighting panel

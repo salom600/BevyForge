@@ -7,6 +7,7 @@ use forge_ipc::{EditorToRuntime, Message, RuntimeToEditor};
 use forge_editor_core::{RuntimeHandle, RuntimeSpawner};
 
 /// Handle to the network layer owned by the app.
+#[allow(dead_code)]
 pub struct Net {
     pub cmd_tx: Sender<EditorToRuntime>,
     pub events: Receiver<NetEvent>,
@@ -43,7 +44,7 @@ impl Net {
 
         // Runtime process signal pump (stdout/exit) — owns the receiver.
         {
-            let mut signals = handle.signals;
+            let signals = handle.signals;
             let evt_tx = evt_tx.clone();
             std::thread::spawn(move || {
                 while let Ok(sig) = signals.recv() {

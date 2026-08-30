@@ -128,7 +128,7 @@ pub fn spawn_relay(
             Ok(x) => x,
             Err(_) => return, // listener closed: runtime shutting down
         };
-        let Ok(mut conn) = Connection::new(stream) else { continue };
+        let Ok(conn) = Connection::new(stream) else { continue };
 
         let cmd_tx = cmd_tx.clone();
         // recv thread: socket -> cmd channel

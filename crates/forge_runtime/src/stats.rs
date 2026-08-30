@@ -11,9 +11,6 @@ use crate::state::IpcChannels;
 /// incremented when the runtime gains systems.
 pub const FORGE_SYSTEM_COUNT: u32 = 22;
 
-#[derive(Resource)]
-struct StatsThrottle(u32);
-
 /// Sample stats every 15 frames and ship them to the editor.
 pub fn collect_stats(world: &mut World) {
     static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);

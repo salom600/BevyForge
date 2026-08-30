@@ -3,10 +3,9 @@
 //! the script editor tabs.
 
 use egui::{Context, Vec2};
-use forge_ipc::{AnimTrack, ComponentField, ComponentKind, EditorToRuntime, FieldValue};
+use forge_ipc::{AnimTrack, ComponentField, EditorToRuntime, FieldValue};
 
 use crate::app::{BevyForgeApp, KeyframeDrag};
-use crate::panels;
 use crate::state::{DockTab, ViewportTab};
 use crate::theme;
 
@@ -717,12 +716,8 @@ fn draw_track_row(
                 for (i, (time, _)) in keys.iter().enumerate() {
                     let x = rect.min.x + (time / duration) * rect.width();
                     if (pos.x - x).abs() < 5.0 {
-                        app.keyframe_drag = Some(KeyframeDrag {
-                            entity,
-                            entity_name: entity_name.to_string(),
-                            track,
-                            index: i,
-                        });
+                        let _ = entity_name;
+                        app.keyframe_drag = Some(KeyframeDrag { entity, track, index: i });
                     }
                 }
             }

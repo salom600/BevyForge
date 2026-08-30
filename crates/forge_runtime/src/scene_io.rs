@@ -13,13 +13,13 @@ use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
 
 use forge_ipc::{
-    AnimEntityTracks, AnimTrack, ComponentKind, EntityId, EnvironmentSettings, MeshPrimitive,
+    AnimTrack, EnvironmentSettings, MeshPrimitive,
 };
 use ron::ser::PrettyConfig;
 
 use crate::factory;
 use crate::state::{
-    EditorLocked, EditorOnlyTag, EnvironmentSettingsHolder, IpcChannels, PlaySnapshot, RuntimeFlags,
+    EditorLocked, EnvironmentSettingsHolder, IpcChannels, PlaySnapshot, RuntimeFlags,
     Selection, UserScene,
 };
 use forge_scripts as scripts;
@@ -194,7 +194,7 @@ pub fn capture_scene(world: &mut World) -> ForgeScene {
 
         let material = world
             .get::<bevy::pbr::MeshMaterial3d<StandardMaterial>>(entity)
-            .and_then(|h| world.get_resource::<Assets<StandardMaterial>>())
+            .and_then(|_h| world.get_resource::<Assets<StandardMaterial>>())
             .and_then(|_| None::<SceneMaterial>); // replaced below (borrow rules)
 
         // Material extraction done separately to satisfy borrows.

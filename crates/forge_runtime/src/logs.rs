@@ -89,7 +89,7 @@ pub fn timestamp_hms() -> String {
 
 /// Drains captured entries and ships them to the editor in batches.
 pub fn push_logs(drain: Option<ResMut<LogDrain>>, channels: Res<IpcChannels>) {
-    let Some(mut drain) = drain else { return };
+    let Some(drain) = drain else { return };
     let mut batch = Vec::new();
     while let Ok(entry) = drain.0.try_recv() {
         batch.push(entry);

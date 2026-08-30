@@ -3,14 +3,14 @@
 
 use std::time::{Duration, Instant};
 
-use egui::{Context, ViewportBuilder, ViewportCommand};
+use egui::{Context, ViewportCommand};
 use forge_editor_core::{Project, UndoEntry, UndoStack};
 use forge_ipc::{
-    ComponentKind, EditorToRuntime, FieldValue, LogLevel, RuntimeToEditor,
+    EditorToRuntime, LogLevel, RuntimeToEditor,
 };
 
 use crate::net::{Net, NetEvent};
-use crate::state::{DockTab, EditorState, ScriptDoc, ViewportTab};
+use crate::state::{DockTab, EditorState, ScriptDoc};
 use crate::panels;
 
 pub struct BevyForgeApp {
@@ -25,9 +25,7 @@ pub struct BevyForgeApp {
     pub keyframe_drag: Option<KeyframeDrag>,
     pub exit_after: Option<f64>,
     pub launched: Instant,
-    pub viewport_size_sent: (u32, u32),
     pub image_previews: std::collections::HashMap<String, egui::TextureHandle>,
-    pub pending_spawn_label: Option<String>,
     pub check_requested: bool,
     pub shortcuts_enabled: bool,
     pub hierarchy_search: String,
@@ -57,7 +55,6 @@ pub enum DialogPurpose {
 #[derive(Debug, Clone)]
 pub struct KeyframeDrag {
     pub entity: u64,
-    pub entity_name: String,
     pub track: forge_ipc::AnimTrack,
     pub index: usize,
 }
@@ -105,9 +102,7 @@ impl BevyForgeApp {
             keyframe_drag: None,
             exit_after,
             launched: Instant::now(),
-            viewport_size_sent: (0, 0),
             image_previews: Default::default(),
-            pending_spawn_label: None,
             check_requested: false,
             shortcuts_enabled: true,
             hierarchy_search: String::new(),
@@ -230,7 +225,7 @@ impl BevyForgeApp {
                 }
             }
             RuntimeToEditor::Stats(stats) => s.stats = stats,
-            RuntimeToEditor::PickResult { x, y, entity } => {
+            RuntimeToEditor::PickResult { x, y: _, entity } => {
                 if x >= 0.0 {
                     if let Some(bits) = entity {
                         s.selected = Some(bits);

@@ -13,8 +13,7 @@ use crate::factory;
 use crate::picking;
 use crate::scene_io;
 use crate::state::{
-    CameraSource, EditorLocked, EditorOnlyTag, IpcChannels, PendingScreenshot, PlaySnapshot,
-    PlayState, RuntimeFlags, ScenePath, Selection, ViewportRig, ViewportSize,
+    CameraSource, EditorLocked, EditorOnlyTag, IpcChannels, PendingScreenshot, RuntimeFlags, ScenePath, Selection, ViewportRig, ViewportSize,
 };
 
 /// Drain and execute all pending commands.
@@ -597,10 +596,4 @@ use bevy::pbr::StandardMaterial;
         let _ = channels.send(RuntimeToEditor::PickResult { x: -1.0, y: -1.0, entity: Some(bits) });
     }
     notify(channels, LogLevel::Info, "Entity duplicated".into());
-}
-
-/// CLI startup screenshot helper: queue a hi-res shot of the initial scene.
-pub fn request_startup_screenshot(path: String, width: u32, height: u32) {
-    // Handled through the StartupShot resource in main(); kept for symmetry.
-    let _ = (path, width, height);
 }

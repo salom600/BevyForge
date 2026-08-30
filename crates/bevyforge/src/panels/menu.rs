@@ -1,11 +1,10 @@
 //! Top menu bar (design row 1): logo, menus, transport controls, badges.
 //! Also: status bar, toasts and keyboard shortcuts.
 
-use egui::{Context, Vec2};
+use egui::Context;
 use forge_ipc::{ComponentKind, EditorToRuntime, LogLevel};
 
 use crate::app::{BevyForgeApp, DialogPurpose};
-use crate::panels;
 use crate::state::ViewportTab;
 use crate::theme;
 
@@ -239,7 +238,7 @@ fn menu_game_object(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
     });
 }
 
-fn add_component(app: &mut BevyForgeApp, ui: &mut egui::Ui, kind: ComponentKind) {
+fn add_component(app: &mut BevyForgeApp, _ui: &mut egui::Ui, kind: ComponentKind) {
     if let Some(entity) = app.selected_entity() {
         app.cmd(EditorToRuntime::AddComponent { entity, component: kind });
     } else {

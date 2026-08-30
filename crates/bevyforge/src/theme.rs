@@ -4,6 +4,7 @@
 
 use egui::{Color32, Style, Vec2};
 
+
 pub const BG_APP: Color32 = Color32::from_rgb(0x0a, 0x0e, 0x14);
 pub const BG_PANEL: Color32 = Color32::from_rgb(0x0e, 0x13, 0x1b);
 pub const BG_HEADER: Color32 = Color32::from_rgb(0x12, 0x18, 0x22);
@@ -53,7 +54,6 @@ pub fn install(ctx: &egui::Context) {
     v.override_text_color = Some(TEXT);
     v.button_frame = true;
     v.collapsing_header_frame = false;
-    v.clip_rect_margin = 3.0;
     v.window_corner_radius = egui::CornerRadius::same(4);
     v.menu_corner_radius = egui::CornerRadius::same(4);
     v.resize_corner_size = 8.0;
