@@ -132,3 +132,43 @@ behaviour systems; on stop it despawns user entities and re-spawns from the snap
 | Status bar | runtime-reported FPS, frame ms, entity count, system count, memory, wgpu backend; connection state dot |
 
 Every visible control is wired to a real effect; nothing is decorative.
+
+## 7. Transform gizmos (drag manipulation)
+
+The manipulator overlay is painted **entirely in the editor process** as a screen-space
+egui layer on top of the streamed frame; no 3D geometry is involved in hit-testing.
+
+```
+runtime                                editor (egui)
+───────                                ──────────────
+CameraInfo { view_proj, eye }  ──────▶ project world → screen (Mat4 inverse, unproject)
+BeginGizmoGesture  ◀──────────────    drag start on a handle (hit-test in px space)
+MoveEntity / RotateEntityWorld /       pointer ray ∩ axis line / constraint plane
+ScaleEntityBy   ◀──────────────        → relative commands at frame rate
+EndGizmoGesture   ◀──────────────
+GestureDone { pre, post }      ──────▶ exact undo pair pushed (runtime-side glam euler)
+```
+
+Design decisions:
+
+- **Relative commands** (`MoveEntity`, `RotateEntityWorld`, `ScaleEntityBy`) are applied
+  to the live `Transform`, so a drag never drifts from inspector refresh latency; the
+  runtime is the single source of truth mid-gesture.
+- **Undo pairs are computed runtime-side** (`BeginGizmoGesture` snapshots, `GestureDone`
+  reports pre/post with glam `EulerRot::XYZ` degrees) so the editor never reimplements
+  quaternion → euler conversion.
+- **Handles**: per-axis arrows + XY/XZ/YZ plane squares + camera-plane centre dot
+  (translate); three projected rings, edge-on ring hidden (rotate); axis squares +
+  uniform centre (scale). Screen-constant size via world-units-per-pixel derived from
+  the view ray at the anchor.
+- **Snapping**: Ctrl holds 0.25 m translation grid, 15° rotation steps, 0.05 scale steps;
+  snapping quantises the *absolute* accumulated value so no error accumulates across
+  drag frames.
+- Locked entities render the gizmo dimmed and ignore gestures; `EditorLocked` is also
+  enforced runtime-side.
+
+## 8. Icon system
+
+`bevyforge/src/icons.rs` paints ~48 glyphs (translate, rotate, scale, transport, files,
+objects, log levels, UI chrome) with egui path primitives in a 16-unit design space —
+no icon font, no raster assets; icons inherit the theme and stay crisp at any DPI.

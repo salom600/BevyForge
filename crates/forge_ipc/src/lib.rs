@@ -25,7 +25,7 @@ pub mod transport;
 pub use transport::{connect, listen, send_on_stream, Connection};
 
 /// BevyForge protocol version. Bumped whenever a message type changes meaning.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Default TCP port the runtime listens on when none is requested.
 pub const DEFAULT_PORT: u16 = 48470;
@@ -303,6 +303,16 @@ pub struct FieldRow {
     pub unit: Option<String>,
 }
 
+/// An entity's transform, captured runtime-side with glam for exact undo.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TransformAbs {
+    pub entity: EntityId,
+    pub translation: [f32; 3],
+    /// Degrees, glam `EulerRot::XYZ` convention (matches the inspector).
+    pub euler_deg: [f32; 3],
+    pub scale: [f32; 3],
+}
+
 /// Log record captured by the runtime's tracing layer.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LogEntry {
@@ -514,6 +524,18 @@ pub enum EditorToRuntime {
     SetViewportCamera { entity: Option<EntityId> },
     /// Hierarchy lock toggle (prevents delete/move on locked entities).
     SetLocked { entity: EntityId, locked: bool },
+    // --- gizmo manipulation (relative, applied to the live transform) ---
+    /// Nudge translation by a world-space delta (viewport gizmo drag).
+    MoveEntity { entity: EntityId, delta: [f32; 3] },
+    /// Rotate around a world-space axis through the entity origin (degrees).
+    RotateEntityWorld { entity: EntityId, axis: [f32; 3], angle_deg: f32 },
+    /// Multiply the entity scale by per-axis factors (clamped > 0.001).
+    ScaleEntityBy { entity: EntityId, factor: [f32; 3] },
+    /// Start a gizmo drag: runtime snapshots the entity transform for undo.
+    BeginGizmoGesture { entity: EntityId },
+    /// Finish a gizmo drag: runtime reports exact pre/post transforms so the
+    /// editor can push a precise undo/redo pair (no float drift).
+    EndGizmoGesture { entity: EntityId, label: String },
     // --- misc ---
     /// Ask for an immediate full state sync (hierarchy, components, anim, env).
     RequestFullState,
@@ -534,6 +556,11 @@ pub enum RuntimeToEditor {
     Pong(u64),
     /// RGB8 offscreen render of the scene camera, viewport-sized.
     Frame { width: u32, height: u32, rgb: Vec<u8> },
+    /// Active viewport camera matrices for gizmo projection. Sent whenever
+    /// the camera moves (column-major view-projection + eye position).
+    CameraInfo { view_proj: [f32; 16], eye: [f32; 3] },
+    /// Exact pre/post transform pair after a gizmo drag (undo bookkeeping).
+    GestureDone { entity: EntityId, label: String, pre: TransformAbs, post: TransformAbs },
     /// Full hierarchy refresh (cheap; sent on change and at 4 Hz).
     Hierarchy { nodes: Vec<HierNode> },
     /// Inspector payload for the selected entity.

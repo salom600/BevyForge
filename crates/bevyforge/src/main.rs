@@ -7,6 +7,8 @@
 #![allow(clippy::too_many_arguments)]
 
 mod app;
+mod gizmo;
+mod icons;
 mod net;
 mod panels;
 mod state;

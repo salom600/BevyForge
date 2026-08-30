@@ -21,40 +21,51 @@ pub fn clock_hms() -> String {
     format!("{:02}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
 }
 
-/// Monochrome glyph per hierarchy node kind (design-style minimal icons).
-pub fn node_glyph(icon: forge_ipc::NodeIcon) -> (&'static str, egui::Color32) {
+/// Vector icon per hierarchy node kind.
+pub fn node_icon(icon: forge_ipc::NodeIcon) -> (crate::icons::Icon, egui::Color32) {
     use egui::Color32;
     use forge_ipc::NodeIcon;
     match icon {
-        NodeIcon::Camera => ("◧", Color32::from_rgb(0x64, 0xb5, 0xf6)),
-        NodeIcon::Light => ("✳", Color32::from_rgb(0xff, 0xd5, 0x4f)),
-        NodeIcon::Mesh => ("⬢", crate::theme::TEXT_DIM),
-        NodeIcon::Player => ("☉", crate::theme::ORANGE),
-        NodeIcon::Script => ("⚙", Color32::from_rgb(0x81, 0xc7, 0x84)),
-        NodeIcon::Group => ("▤", crate::theme::TEXT_DIM),
-        NodeIcon::Environment => ("❋", Color32::from_rgb(0x9f, 0xa8, 0xda)),
+        NodeIcon::Camera => (crate::icons::Icon::Camera, Color32::from_rgb(0x64, 0xb5, 0xf6)),
+        NodeIcon::Light => (crate::icons::Icon::Light, Color32::from_rgb(0xff, 0xd5, 0x4f)),
+        NodeIcon::Mesh => (crate::icons::Icon::Cube, Color32::from_rgb(0x9a, 0xb4, 0xd0)),
+        NodeIcon::Player => (crate::icons::Icon::Player, crate::theme::ORANGE),
+        NodeIcon::Script => (crate::icons::Icon::Script, Color32::from_rgb(0x81, 0xc7, 0x84)),
+        NodeIcon::Group => (crate::icons::Icon::Group, crate::theme::TEXT_DIM),
+        NodeIcon::Environment => (crate::icons::Icon::Env, Color32::from_rgb(0x9f, 0xa8, 0xda)),
     }
 }
 
-/// File icon by extension for the asset browser.
-pub fn file_glyph(name: &str, is_dir: bool) -> (&'static str, egui::Color32) {
+/// Vector file icon by extension for the asset browser.
+pub fn file_icon(name: &str, is_dir: bool) -> (crate::icons::Icon, egui::Color32) {
     use egui::Color32;
     if is_dir {
-        return ("▤", Color32::from_rgb(0xe8, 0xb3, 0x4b));
+        return (crate::icons::Icon::Folder, Color32::from_rgb(0xe8, 0xb3, 0x4b));
     }
     let lower = name.to_lowercase();
     if lower.ends_with(".scn.ron") || lower.ends_with(".ron") {
-        ("❐", Color32::from_rgb(0x64, 0xb5, 0xf6))
+        (crate::icons::Icon::Scene, Color32::from_rgb(0x64, 0xb5, 0xf6))
     } else if lower.ends_with(".rs") {
-        ("⬢", crate::theme::ORANGE)
+        (crate::icons::Icon::Script, crate::theme::ORANGE)
     } else if lower.ends_with(".png") || lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
-        ("▩", Color32::from_rgb(0x81, 0xc7, 0x84))
+        (crate::icons::Icon::Image, Color32::from_rgb(0x81, 0xc7, 0x84))
     } else if lower.ends_with(".toml") {
-        ("⚑", crate::theme::TEXT_DIM)
+        (crate::icons::Icon::Config, crate::theme::TEXT_DIM)
     } else if lower.ends_with(".gltf") || lower.ends_with(".glb") || lower.ends_with(".obj") {
-        ("◈", Color32::from_rgb(0xb3, 0x9d, 0xdb))
+        (crate::icons::Icon::Material, Color32::from_rgb(0xb3, 0x9d, 0xdb))
     } else {
-        ("▪", crate::theme::TEXT_DIM)
+        (crate::icons::Icon::File, crate::theme::TEXT_DIM)
+    }
+}
+
+/// Icon for a console / toast log level.
+pub fn level_icon(level: forge_ipc::LogLevel) -> crate::icons::Icon {
+    use forge_ipc::LogLevel;
+    match level {
+        LogLevel::Info => crate::icons::Icon::Info,
+        LogLevel::Warn => crate::icons::Icon::Warn,
+        LogLevel::Error => crate::icons::Icon::Error,
+        LogLevel::Debug | LogLevel::Trace => crate::icons::Icon::Console,
     }
 }
 

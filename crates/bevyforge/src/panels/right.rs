@@ -17,8 +17,8 @@ pub fn inspector_panel(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
         .frame(egui::Frame::new().fill(theme::BG_PANEL).stroke(egui::Stroke::new(1.0, theme::BORDER)))
         .show(ui, |ui| {
             ui.vertical(|ui| {
-                theme::panel_header(ui, "Inspector", |ui| {
-                    if crate::panels::tool_button(ui, "⤢", "Frame selection (F)") {
+                theme::panel_header_iconed(ui, Some(crate::icons::Icon::Wrench), "Inspector", |ui| {
+                    if crate::icons::icon_button(ui, crate::icons::Icon::Frame, "Frame selection (F)") {
                         if let Some(sel) = app.state.selected {
                             let _ = sel;
                         }
@@ -325,8 +325,8 @@ pub fn environment_panel(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
         .frame(egui::Frame::new().fill(theme::BG_PANEL).stroke(egui::Stroke::new(1.0, theme::BORDER)))
         .show(ui, |ui| {
             ui.vertical(|ui| {
-                theme::panel_header(ui, "Environment && Lighting", |ui| {
-                    if crate::panels::tool_button(ui, "⟳", "Request settings from runtime") {
+                theme::panel_header_iconed(ui, Some(crate::icons::Icon::Env), "Environment && Lighting", |ui| {
+                    if crate::icons::icon_button(ui, crate::icons::Icon::Reload, "Request settings from runtime") {
                         app.cmd(EditorToRuntime::RequestFullState);
                     }
                 });

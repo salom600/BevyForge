@@ -89,8 +89,13 @@ pub fn install(ctx: &egui::Context) {
     ctx.all_styles_mut(|s| *s = style.clone());
 }
 
-/// Panel header bar ("SCENE", "INSPECTOR", ...) as used across the design.
-pub fn panel_header(ui: &mut egui::Ui, title: &str, actions: impl FnOnce(&mut egui::Ui)) {
+/// Panel header with a small vector icon before the title.
+pub fn panel_header_iconed(
+    ui: &mut egui::Ui,
+    icon: Option<crate::icons::Icon>,
+    title: &str,
+    actions: impl FnOnce(&mut egui::Ui),
+) {
     let header_rect = egui::Rect::from_min_size(
         ui.available_rect_before_wrap().min,
         Vec2::new(ui.available_width(), 24.0),
@@ -104,6 +109,11 @@ pub fn panel_header(ui: &mut egui::Ui, title: &str, actions: impl FnOnce(&mut eg
                 let rect = ui.available_rect_before_wrap();
                 ui.painter().rect_filled(rect, 0, BG_HEADER);
                 ui.add_space(6.0);
+                if let Some(icon) = icon {
+                    let icon_rect = ui.allocate_exact_size(Vec2::splat(13.0), egui::Sense::hover()).0;
+                    crate::icons::paint(ui.painter(), icon, icon_rect, ACCENT);
+                    ui.add_space(2.0);
+                }
                 ui.label(
                     egui::RichText::new(title.to_uppercase())
                         .small()

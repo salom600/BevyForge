@@ -13,6 +13,9 @@ use crate::net::{Net, NetEvent};
 use crate::state::{DockTab, EditorState, ScriptDoc};
 use crate::panels;
 
+/// Engine version this editor pairs with (mirrors forge_runtime::ENGINE_VERSION).
+pub const BEVY_VERSION: &str = "0.19";
+
 pub struct BevyForgeApp {
     pub state: EditorState,
     pub net: Option<Net>,
@@ -135,6 +138,18 @@ impl BevyForgeApp {
         });
     }
 
+    /// Record an undo entry WITHOUT re-applying its forward commands (used by
+    /// gizmo gestures: the effects are already live in the runtime).
+    pub fn push_undo_only(&mut self, label: &str, undo: Vec<EditorToRuntime>, redo: Vec<EditorToRuntime>) {
+        self.undo.push(UndoEntry {
+            label: label.to_string(),
+            undo,
+            redo,
+            spawned_entity: None,
+            trash_id: None,
+        });
+    }
+
     pub fn selected_entity(&self) -> Option<u64> {
         self.state.selected
     }
@@ -225,6 +240,35 @@ impl BevyForgeApp {
                 }
             }
             RuntimeToEditor::Stats(stats) => s.stats = stats,
+            RuntimeToEditor::CameraInfo { view_proj, eye } => {
+                s.camera_vp = Some(crate::gizmo::Mat4::from_cols_array(view_proj));
+                s.camera_eye = eye;
+            }
+            RuntimeToEditor::GestureDone { entity, label, pre, post } => {
+                if s.selected == Some(entity) && pre != post {
+                    let fields = |t: forge_ipc::TransformAbs| vec![
+                        EditorToRuntime::SetField {
+                            entity,
+                            component: forge_ipc::ComponentKind::Transform,
+                            field: forge_ipc::ComponentField::Translation,
+                            value: forge_ipc::FieldValue::Vec3(t.translation),
+                        },
+                        EditorToRuntime::SetField {
+                            entity,
+                            component: forge_ipc::ComponentKind::Transform,
+                            field: forge_ipc::ComponentField::RotationEulerDeg,
+                            value: forge_ipc::FieldValue::Vec3(t.euler_deg),
+                        },
+                        EditorToRuntime::SetField {
+                            entity,
+                            component: forge_ipc::ComponentKind::Transform,
+                            field: forge_ipc::ComponentField::Scale,
+                            value: forge_ipc::FieldValue::Vec3(t.scale),
+                        },
+                    ];
+                    self.push_undo_only(&label, fields(pre), fields(post));
+                }
+            }
             RuntimeToEditor::PickResult { x, y: _, entity } => {
                 if x >= 0.0 {
                     if let Some(bits) = entity {

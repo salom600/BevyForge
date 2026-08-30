@@ -20,12 +20,9 @@ pub fn top_menu_bar(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
         )
         .show(ui, |ui| {
             ui.horizontal_centered(|ui| {
-                // Logo block.
-                ui.label(
-                    egui::RichText::new("◆")
-                        .size(16.0)
-                        .color(theme::ACCENT),
-                );
+                // Logo block: painted Bevy mark.
+                let logo_rect = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover()).0;
+                crate::icons::paint(ui.painter(), crate::icons::Icon::Bevy, logo_rect, theme::ORANGE);
                 ui.label(
                     egui::RichText::new("BevyForge")
                         .strong()
@@ -33,7 +30,7 @@ pub fn top_menu_bar(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
                         .color(theme::TEXT),
                 );
                 ui.label(
-                    egui::RichText::new(concat!("0.1.0", " · ", "bevy 0.19"))
+                    egui::RichText::new(format!("{} · bevy {}", env!("CARGO_PKG_VERSION"), crate::app::BEVY_VERSION))
                         .small()
                         .color(theme::TEXT_DIM),
                 );
@@ -63,37 +60,61 @@ pub fn top_menu_bar(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
 
                     ui.separator();
 
-                    // Transport controls.
-                    let play_label = if app.state.playing { "Stop" } else { "Play" };
-                    let play = ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new(play_label).size(12.0).color(if app.state.playing { theme::YELLOW } else { theme::GREEN }),
-                            )
-                            ,
-                        )
-                        .on_hover_text(if app.state.playing { "Stop play mode (restore snapshot)" } else { "Enter play mode (runs gameplay systems)" });
-                    if play.clicked() {
+                    // Transport controls (icon buttons). NOTE: layout is
+                    // right-to-left, so items added first appear rightmost.
+                    let playing = app.state.playing;
+                    let play = crate::icons::icon_button_colored(
+                        ui,
+                        if playing { crate::icons::Icon::Stop } else { crate::icons::Icon::Play },
+                        if playing { "Stop play mode (restore snapshot)" } else { "Enter play mode (runs gameplay systems)" },
+                        if playing { theme::YELLOW } else { theme::GREEN },
+                    );
+                    if play {
                         app.toggle_play();
                     }
-                    let stop = ui
-                        .add(
-                            egui::Button::new(egui::RichText::new("Stop").size(11.0).color(theme::RED))
-                                ,
-                        )
-                        .on_hover_text("Stop play mode");
-                    if stop.clicked() && app.state.playing {
-                        app.toggle_play();
+                    // Animation frame-step + pause cluster.
+                    if crate::icons::icon_button(ui, crate::icons::Icon::SkipBack, "Step animation back") {
+                        let t = (app.state.anim.time - 1.0 / 30.0).max(0.0);
+                        app.cmd(EditorToRuntime::SetAnimTime(t));
                     }
-                    let pause = ui
-                        .add(
-                            egui::Button::new(egui::RichText::new("Anim").size(11.0).color(theme::TEXT_DIM))
-                                ,
-                        )
-                        .on_hover_text("Pause/Resume animation playback");
-                    if pause.clicked() {
+                    let anim_playing = app.state.anim.playing;
+                    if crate::icons::icon_button_colored(
+                        ui,
+                        if anim_playing { crate::icons::Icon::Pause } else { crate::icons::Icon::PlayCircle },
+                        "Pause/Resume animation playback",
+                        theme::TEXT_DIM,
+                    ) {
                         let target = !app.state.anim.playing;
                         app.cmd(EditorToRuntime::SetAnimPlaying(target));
+                    }
+                    if crate::icons::icon_button(ui, crate::icons::Icon::SkipForward, "Step animation forward") {
+                        let t = (app.state.anim.time + 1.0 / 30.0).min(app.state.anim.duration);
+                        app.cmd(EditorToRuntime::SetAnimTime(t));
+                    }
+
+                    ui.separator();
+
+                    // Undo / redo (icons reflect availability).
+                    if crate::icons::icon_button_colored(ui, crate::icons::Icon::Redo, "Redo (Ctrl+Y)", if app.undo.can_redo() { theme::TEXT } else { theme::BORDER }) {
+                        if let Some(entry) = app.undo.pop_redo() {
+                            for c in entry.redo {
+                                app.cmd(c);
+                            }
+                        }
+                    }
+                    if crate::icons::icon_button_colored(ui, crate::icons::Icon::Undo, "Undo (Ctrl+Z)", if app.undo.can_undo() { theme::TEXT } else { theme::BORDER }) {
+                        if let Some(entry) = app.undo.pop_undo() {
+                            for c in entry.undo {
+                                app.cmd(c);
+                            }
+                        }
+                    }
+
+                    ui.separator();
+
+                    // Save.
+                    if crate::icons::icon_button(ui, crate::icons::Icon::Save, "Save scene (Ctrl+S)") {
+                        save_scene(app);
                     }
                 });
             });
@@ -265,6 +286,22 @@ fn menu_component(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
 
 fn menu_window(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
     ui.menu_button("Window", |ui| {
+        // Manipulator tools.
+        use crate::gizmo::GizmoMode;
+        for (label, mode) in [
+            ("Move Tool\tW", GizmoMode::Translate),
+            ("Rotate Tool\tE", GizmoMode::Rotate),
+            ("Scale Tool\tR", GizmoMode::Scale),
+        ] {
+            if ui
+                .selectable_label(app.state.gizmo_mode == mode, label)
+                .clicked()
+            {
+                app.state.gizmo_mode = mode;
+                ui.close();
+            }
+        }
+        ui.separator();
         toggle(ui, "Scene Hierarchy", &mut app.state.show_hierarchy);
         toggle(ui, "Asset Browser", &mut app.state.show_assets);
         toggle(ui, "Inspector", &mut app.state.show_inspector);
@@ -383,7 +420,13 @@ pub fn draw_toasts(app: &mut BevyForgeApp, ctx: &Context) {
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width().min(400.0));
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("●").small().color(color));
+                            let icon_rect = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover()).0;
+                            crate::icons::paint(
+                                ui.painter(),
+                                crate::panels::level_icon(*level),
+                                icon_rect,
+                                color,
+                            );
                             ui.label(
                                 egui::RichText::new(message)
                                     .small()
@@ -438,6 +481,12 @@ pub fn handle_shortcuts(app: &mut BevyForgeApp, ctx: &Context) {
             app.duplicate_selected();
         } else if i.key_pressed(egui::Key::Delete) {
             app.delete_selected();
+        } else if i.key_pressed(egui::Key::W) && !i.modifiers.command {
+            app.state.gizmo_mode = crate::gizmo::GizmoMode::Translate;
+        } else if i.key_pressed(egui::Key::E) && !i.modifiers.command {
+            app.state.gizmo_mode = crate::gizmo::GizmoMode::Rotate;
+        } else if i.key_pressed(egui::Key::R) && !i.modifiers.command {
+            app.state.gizmo_mode = crate::gizmo::GizmoMode::Scale;
         } else if i.key_pressed(egui::Key::F) && !i.modifiers.command {
             if let Some(sel) = app.state.selected {
                 // Frame selection: focus orbit target on the entity position

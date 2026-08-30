@@ -138,42 +138,44 @@ fn draw_viewport(app: &mut BevyForgeApp, ui: &mut egui::Ui, rect: egui::Rect) {
         ui.painter().rect_filled(tb_rect, 0, theme::BG_HEADER);
         ui.horizontal(|ui| {
             ui.add_space(4.0);
-            let persp = egui::Button::new(
-                egui::RichText::new("◉ Perspective").size(11.5),
-            );
-            if ui.add(persp).clicked() {
+            if crate::icons::icon_button_colored(ui, crate::icons::Icon::Perspective, "Reset the editor camera rig", theme::ACCENT) {
                 // Perspective is the only projection; reset the rig instead.
                 app.state.camera_rig = ([0.0, 0.5, 0.0], 12.0, -35.0, 28.0);
                 app.send_camera();
             }
-            let grid = ui
-                .selectable_label(app.state.show_grid, egui::RichText::new("▦ Grid").size(11.5))
-                .on_hover_text("Toggle reference grid");
-            if grid.clicked() {
+            ui.label(egui::RichText::new("Perspective").size(11.5));
+            ui.separator();
+            // Transform manipulator modes (Unity-style W/E/R).
+            if crate::icons::icon_toggle(ui, crate::icons::Icon::Translate, "Move tool (W)", app.state.gizmo_mode == crate::gizmo::GizmoMode::Translate) {
+                app.state.gizmo_mode = crate::gizmo::GizmoMode::Translate;
+            }
+            if crate::icons::icon_toggle(ui, crate::icons::Icon::Rotate, "Rotate tool (E)", app.state.gizmo_mode == crate::gizmo::GizmoMode::Rotate) {
+                app.state.gizmo_mode = crate::gizmo::GizmoMode::Rotate;
+            }
+            if crate::icons::icon_toggle(ui, crate::icons::Icon::Scale, "Scale tool (R)", app.state.gizmo_mode == crate::gizmo::GizmoMode::Scale) {
+                app.state.gizmo_mode = crate::gizmo::GizmoMode::Scale;
+            }
+            ui.label(
+                egui::RichText::new(app.state.gizmo_mode.label())
+                    .size(10.5)
+                    .color(theme::TEXT_DIM),
+            );
+            ui.separator();
+            if crate::icons::icon_toggle(ui, crate::icons::Icon::Grid, "Toggle reference grid", app.state.show_grid) {
                 app.state.show_grid = !app.state.show_grid;
                 let mut env = app.state.env.clone();
                 env.show_grid = app.state.show_grid;
                 app.state.env = env.clone();
                 app.cmd(EditorToRuntime::SetEnvironment(env));
             }
-            let outline = ui
-                .selectable_label(
-                    app.state.show_outline,
-                    egui::RichText::new("◫ Outline").size(11.5),
-                )
-                .on_hover_text("Toggle selection outline");
-            if outline.clicked() {
+            if crate::icons::icon_toggle(ui, crate::icons::Icon::Outline, "Toggle selection outline", app.state.show_outline) {
                 app.state.show_outline = !app.state.show_outline;
                 let mut env = app.state.env.clone();
                 env.show_selection_outline = app.state.show_outline;
                 app.state.env = env.clone();
                 app.cmd(EditorToRuntime::SetEnvironment(env));
             }
-            if ui
-                .add(egui::Button::new(egui::RichText::new("⦿ Frame").size(11.5)))
-                .on_hover_text("Frame selected entity (F)")
-                .clicked()
-            {
+            if crate::icons::icon_button(ui, crate::icons::Icon::Frame, "Frame selected entity (F)") {
                 frame_selected(app);
             }
             ui.separator();
@@ -203,7 +205,12 @@ fn draw_viewport(app: &mut BevyForgeApp, ui: &mut egui::Ui, rect: egui::Rect) {
 
     // The streamed frame.
     let (resp, image_rect) = draw_frame(app, ui, frame_rect);
-    handle_viewport_input(app, ui, &resp, image_rect);
+    // Gizmo overlay first: it may consume the pointer gesture.
+    let gizmo_active = match image_rect {
+        Some(ir) => crate::gizmo::draw_and_handle(app, ui, ir, &resp),
+        None => false,
+    };
+    handle_viewport_input(app, ui, &resp, image_rect, gizmo_active);
 }
 
 fn tab_button(ui: &mut egui::Ui, label: &str, tab: ViewportTab, app: &mut BevyForgeApp) {
@@ -299,6 +306,7 @@ fn handle_viewport_input(
     ui: &mut egui::Ui,
     resp: &egui::Response,
     image_rect: Option<egui::Rect>,
+    gizmo_active: bool,
 ) {
     let drag = resp.dragged();
     let button = ui.input(|i| i.pointer.secondary_down() || i.pointer.middle_down());
@@ -342,9 +350,11 @@ fn handle_viewport_input(
         }
     }
 
-    // Click select (pick) — only on clean clicks with left button.
+    // Click select (pick) — only on clean clicks with left button, and never
+    // right after a gizmo gesture.
     if resp.clicked()
         && !resp.dragged()
+        && !gizmo_active
         && ui.input(|i| !i.pointer.secondary_down())
     {
         if let Some(ir) = image_rect {
@@ -498,25 +508,25 @@ fn dock_tab(ui: &mut egui::Ui, label: &str, tab: DockTab, app: &mut BevyForgeApp
 
 fn draw_timeline(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
     ui.vertical(|ui| {
-        // Transport row.
+        // Transport row (icons).
         ui.horizontal(|ui| {
-            let play_label = if app.state.anim.playing { "Pause" } else { "Play" };
-            if ui
-                .add(egui::Button::new(
-                    egui::RichText::new(play_label)
-                        .color(if app.state.anim.playing { theme::YELLOW } else { theme::GREEN }),
-                ))
-                .clicked()
-            {
+            let anim_playing = app.state.anim.playing;
+            if crate::icons::icon_button_colored(
+                ui,
+                if anim_playing { crate::icons::Icon::Pause } else { crate::icons::Icon::Play },
+                if anim_playing { "Pause animation" } else { "Play animation" },
+                if anim_playing { theme::YELLOW } else { theme::GREEN },
+            ) {
                 let target = !app.state.anim.playing;
                 app.cmd(EditorToRuntime::SetAnimPlaying(target));
             }
-            if ui.button("Rewind").on_hover_text("Stop (rewind to 0)").clicked() {
+            if crate::icons::icon_button(ui, crate::icons::Icon::Rewind, "Stop (rewind to 0)") {
                 app.cmd(EditorToRuntime::SetAnimTime(0.0));
                 app.cmd(EditorToRuntime::SetAnimPlaying(false));
             }
             let mut looped = app.state.anim.looped;
-            if ui.toggle_value(&mut looped, "Loop").changed() {
+            let loop_resp = ui.toggle_value(&mut looped, "Loop").on_hover_text("Loop playback");
+            if loop_resp.changed() {
                 app.cmd(EditorToRuntime::SetAnimLooped(looped));
             }
             let t = app.state.anim.time;
@@ -543,13 +553,10 @@ fn draw_timeline(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
                 app.cmd(EditorToRuntime::SetAnimDuration(dur));
             }
             ui.separator();
-            if ui
-                .button("＋ Key from current")
-                .on_hover_text("Add keyframes on all tracks of the selection at the playhead, capturing current transform values")
-                .clicked()
-            {
+            if crate::icons::icon_button(ui, crate::icons::Icon::Keyframe, "Add keyframes on all tracks of the selection at the playhead, capturing current transform values") {
                 add_keys_from_current(app);
             }
+            ui.label(egui::RichText::new("Key from current").size(11.5).color(theme::TEXT_DIM));
         });
         ui.separator();
 

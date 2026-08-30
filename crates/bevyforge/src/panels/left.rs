@@ -17,9 +17,9 @@ pub fn hierarchy_panel(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
         .show(ui, |ui| {
         ui.vertical(|ui| {
             // Header.
-            theme::panel_header(ui, "Scene", |ui| {
-                if crate::panels::tool_button(ui, "＋", "Create object (see GameObject menu)") {}
-                if crate::panels::tool_button(ui, "⟳", "Refresh hierarchy") {
+            theme::panel_header_iconed(ui, Some(crate::icons::Icon::Layers), "Scene", |ui| {
+                if crate::icons::icon_button(ui, crate::icons::Icon::Plus, "Create object (see GameObject menu)") {}
+                if crate::icons::icon_button(ui, crate::icons::Icon::Reload, "Refresh hierarchy") {
                     app.cmd(EditorToRuntime::RequestFullState);
                 }
             });
@@ -28,8 +28,8 @@ pub fn hierarchy_panel(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
             // Tabs row (Hierarchy/Entities both show the same tree; Entities
             // is a flat list view).
             ui.horizontal(|ui| {
-                ui.selectable_label(true, egui::RichText::new("Hierarchy").size(12.0));
-                ui.selectable_label(false, egui::RichText::new("Entities").size(12.0).color(theme::TEXT_DIM));
+                let _ = ui.selectable_label(true, egui::RichText::new("Hierarchy").size(12.0));
+                let _ = ui.selectable_label(false, egui::RichText::new("Entities").size(12.0).color(theme::TEXT_DIM));
             });
             ui.separator();
 
@@ -150,7 +150,7 @@ fn draw_node(
 ) {
     let expanded = app.state.expanded.contains(&node.id);
     let selected = app.state.selected == Some(node.id);
-    let (glyph, glyph_color) = crate::panels::node_glyph(node.icon);
+    let (node_ic, glyph_color) = crate::panels::node_icon(node.icon);
 
     let row = egui::Frame::new()
         .fill(if selected { theme::ACCENT_DIM } else { egui::Color32::TRANSPARENT })
@@ -213,14 +213,14 @@ fn draw_node(
                 text = format!("{text}  ↳in subtree");
             }
             let name_color = if node.visible { theme::TEXT } else { theme::TEXT_DIM };
-            painter.text(
-                egui::pos2(row_rect.min.x + 2.0, row_rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                glyph,
-                egui::FontId::proportional(12.0),
-                glyph_color,
+            crate::icons::inline_icon(
+                painter,
+                node_ic,
+                egui::pos2(row_rect.min.x + 9.0, row_rect.center().y),
+                13.0,
+                if node.visible { glyph_color } else { glyph_color.gamma_multiply(0.45) },
             );
-            let name_x = row_rect.min.x + 18.0;
+            let name_x = row_rect.min.x + 20.0;
             painter.text(
                 egui::pos2(name_x, row_rect.center().y),
                 egui::Align2::LEFT_CENTER,
@@ -233,17 +233,16 @@ fn draw_node(
             if hovered || selected {
                 let mut x = row_rect.max.x - 18.0;
                 // Eye toggle.
-                let eye = if node.visible { "👁" } else { "⊖" };
                 let eye_rect = egui::Rect::from_center_size(
                     egui::pos2(x, row_rect.center().y),
                     Vec2::new(16.0, 16.0),
                 );
                 let eye_resp = ui.interact(eye_rect, ui.id().with(("eye", node.id)), egui::Sense::click());
-                painter.text(
+                crate::icons::inline_icon(
+                    painter,
+                    if node.visible { crate::icons::Icon::Eye } else { crate::icons::Icon::EyeOff },
                     eye_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    eye,
-                    egui::FontId::proportional(11.0),
+                    12.0,
                     if node.visible { theme::TEXT_DIM } else { theme::RED },
                 );
                 if eye_resp.clicked() {
@@ -262,11 +261,11 @@ fn draw_node(
                     Vec2::new(16.0, 16.0),
                 );
                 let lock_resp = ui.interact(lock_rect, ui.id().with(("lock", node.id)), egui::Sense::click());
-                painter.text(
+                crate::icons::inline_icon(
+                    painter,
+                    if node.locked { crate::icons::Icon::Lock } else { crate::icons::Icon::Unlock },
                     lock_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    if node.locked { "🔒" } else { "🔓" },
-                    egui::FontId::proportional(9.5),
+                    12.0,
                     if node.locked { theme::YELLOW } else { theme::TEXT_DIM },
                 );
                 if lock_resp.clicked() {
@@ -355,11 +354,11 @@ pub fn assets_panel(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
         .frame(egui::Frame::new().fill(theme::BG_PANEL).stroke(egui::Stroke::new(1.0, theme::BORDER)))
         .show(ui, |ui| {
             ui.vertical(|ui| {
-                theme::panel_header(ui, "Assets", |ui| {
-                    if crate::panels::tool_button(ui, "⟳", "Refresh files") {
+                theme::panel_header_iconed(ui, Some(crate::icons::Icon::Folder), "Assets", |ui| {
+                    if crate::icons::icon_button(ui, crate::icons::Icon::Reload, "Refresh files") {
                         // file listing is live; nothing to do
                     }
-                    if crate::panels::tool_button(ui, "⌂", "Reveal project root") {
+                    if crate::icons::icon_button(ui, crate::icons::Icon::Home, "Reveal project root") {
                         if let Some(project) = &app.project {
                             app.state.push_toast(
                                 forge_ipc::LogLevel::Info,
@@ -446,7 +445,7 @@ pub fn assets_panel(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
                                         continue;
                                     }
                                     let is_dir = entry.is_dir();
-                                    let (glyph, color) = crate::panels::file_glyph(&name, is_dir);
+                                    let (file_ic, color) = crate::panels::file_icon(&name, is_dir);
                                     let (rect, resp) = ui.allocate_exact_size(
                                         Vec2::new(cell - 6.0, cell - 4.0),
                                         egui::Sense::click_and_drag(),
@@ -455,11 +454,11 @@ pub fn assets_panel(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
                                     if resp.hovered() {
                                         painter.rect_filled(rect, 3, theme::BG_WIDGET_HOVER);
                                     }
-                                    painter.text(
+                                    crate::icons::inline_icon(
+                                        painter,
+                                        file_ic,
                                         egui::pos2(rect.center().x, rect.min.y + 24.0),
-                                        egui::Align2::CENTER_CENTER,
-                                        glyph,
-                                        egui::FontId::proportional(22.0),
+                                        26.0,
                                         color,
                                     );
                                     let short = if name.chars().count() > 14 {

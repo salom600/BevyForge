@@ -83,6 +83,14 @@ pub struct EditorState {
     pub show_outline: bool,
     /// (target xyz, distance, yaw deg, pitch deg)
     pub camera_rig: ([f32; 3], f32, f32, f32),
+    /// Runtime camera view-projection (column-major) for gizmo projection.
+    pub camera_vp: Option<crate::gizmo::Mat4>,
+    /// Runtime camera eye position (world space).
+    pub camera_eye: [f32; 3],
+    /// Active manipulator (toolbar / W-E-R).
+    pub gizmo_mode: crate::gizmo::GizmoMode,
+    /// In-progress viewport gizmo drag.
+    pub gizmo_drag: Option<crate::gizmo::DragState>,
 
     // --- panels visibility ---
     pub show_hierarchy: bool,
@@ -144,6 +152,10 @@ impl Default for EditorState {
             show_grid: true,
             show_outline: true,
             camera_rig: ([0.0, 0.5, 0.0], 12.0, -35.0, 28.0),
+            camera_vp: None,
+            camera_eye: [0.0, 0.0, 12.0],
+            gizmo_mode: crate::gizmo::GizmoMode::Translate,
+            gizmo_drag: None,
             show_hierarchy: true,
             show_assets: true,
             show_inspector: true,

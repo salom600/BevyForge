@@ -226,6 +226,76 @@ fn execute_one(
             }
             flags.hierarchy_dirty = true;
         }
+        EditorToRuntime::MoveEntity { entity, delta } => {
+            let Some(entity) = entity_of(entity) else { return };
+            if world.get::<EditorLocked>(entity).is_some() {
+                return;
+            }
+            if let Some(mut t) = world.get_mut::<Transform>(entity) {
+                t.translation += Vec3::new(delta[0], delta[1], delta[2]);
+                flags.components_dirty = true;
+                flags.scene_dirty = true;
+            }
+        }
+        EditorToRuntime::RotateEntityWorld { entity, axis, angle_deg } => {
+            let Some(entity) = entity_of(entity) else { return };
+            if world.get::<EditorLocked>(entity).is_some() {
+                return;
+            }
+            let axis = Vec3::new(axis[0], axis[1], axis[2]);
+            let Some(axis) = axis.try_normalize() else { return };
+            if let Some(mut t) = world.get_mut::<Transform>(entity) {
+                let q = Quat::from_axis_angle(axis, angle_deg.to_radians());
+                t.rotation = (q * t.rotation).normalize();
+                flags.components_dirty = true;
+                flags.scene_dirty = true;
+            }
+        }
+        EditorToRuntime::ScaleEntityBy { entity, factor } => {
+            let Some(entity) = entity_of(entity) else { return };
+            if world.get::<EditorLocked>(entity).is_some() {
+                return;
+            }
+            if let Some(mut t) = world.get_mut::<Transform>(entity) {
+                let f = Vec3::new(factor[0], factor[1], factor[2]);
+                t.scale = (t.scale * f).max(Vec3::splat(0.001));
+                flags.components_dirty = true;
+                flags.scene_dirty = true;
+            }
+        }
+        EditorToRuntime::BeginGizmoGesture { entity } => {
+            let Some(entity) = entity_of(entity) else { return };
+            let snapshot = world.get::<Transform>(entity).map(capture_transform);
+            world
+                .resource_mut::<crate::state::GestureSnapshot>()
+                .0 = snapshot.map(|(translation, euler_deg, scale)| forge_ipc::TransformAbs {
+                entity: entity.to_bits(),
+                translation,
+                euler_deg,
+                scale,
+            });
+        }
+        EditorToRuntime::EndGizmoGesture { entity, label } => {
+            let Some(entity) = entity_of(entity) else { return };
+            let pre = world.resource::<crate::state::GestureSnapshot>().0;
+            let post = world.get::<Transform>(entity).map(capture_transform).map(
+                |(translation, euler_deg, scale)| forge_ipc::TransformAbs {
+                    entity: entity.to_bits(),
+                    translation,
+                    euler_deg,
+                    scale,
+                },
+            );
+            world.resource_mut::<crate::state::GestureSnapshot>().0 = None;
+            if let (Some(pre), Some(post)) = (pre, post) {
+                let _ = channels.send(RuntimeToEditor::GestureDone {
+                    entity: entity.to_bits(),
+                    label,
+                    pre,
+                    post,
+                });
+            }
+        }
         EditorToRuntime::SetField { entity, component, field, value } => {
             let Some(entity) = entity_of(entity) else { return };
             match factory::apply_set_field(world, entity, component, field, value) {
@@ -415,6 +485,16 @@ fn execute_one(
             world.write_message(AppExit::Success);
         }
     }
+}
+
+/// Snapshot a transform with glam, euler in degrees (inspector convention).
+fn capture_transform(t: &Transform) -> ([f32; 3], [f32; 3], [f32; 3]) {
+    let (x, y, z) = t.rotation.to_euler(EulerRot::XYZ);
+    (
+        t.translation.to_array(),
+        [x.to_degrees(), y.to_degrees(), z.to_degrees()],
+        t.scale.to_array(),
+    )
 }
 
 /// Apply the orbit rig transform to the editor camera.

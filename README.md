@@ -22,10 +22,11 @@ engine, built as a two-process system:
 
 | Panel | Capabilities |
 |---|---|
-| **Scene hierarchy** | tree view, search, click select, drag reparent, lock, visibility toggles, context-menu create/duplicate/delete |
+| **Scene hierarchy** | tree view, search, click select, drag reparent, lock, visibility toggles, context-menu create/duplicate/delete — with painted vector icons per node kind |
 | **Viewport** | live offscreen render stream (Scene tab = editor orbit camera, Game tab = scene camera), click-to-select via mesh ray casting, grid + selection outline, orbit/pan/zoom |
+| **Transform gizmos** | drag-to-move arrows + plane handles + camera-plane centre dot, rotation rings per axis, per-axis and uniform scale handles; screen-constant size; Ctrl snapping (0.25 m grid, 15° angle); W/E/R hotkeys; every gesture lands in the undo stack as an exact pre/post pair |
 | **Inspector** | typed editing of transforms, materials, lights, cameras and gameplay scripts; add/remove components; rename; active/visibility toggle |
-| **Timeline** | per-entity translation/rotation/scale keyframes, scrubbing, looped playback, drag keyframes, capture-from-selection |
+| **Timeline** | per-entity translation/rotation/scale keyframes, scrubbing, looped playback, drag keyframes, capture-from-selection, icon transport controls |
 | **Assets** | live filesystem browser for `project/assets`, scene double-click open, image previews, script double-click edit |
 | **Console** | engine log stream with level filter |
 | **Rust Compiler** | `cargo check` runner with JSON diagnostics, error/warning counters, click-to-open-line |
@@ -33,7 +34,27 @@ engine, built as a two-process system:
 | **Environment** | ambient light, sun orbit/illuminance/shadows, tonemapping, EV100 exposure, fog, clear colour, grid/outline toggles |
 | **Play Mode** | snapshot → run gameplay systems → full state restore on stop |
 
-Every control is wired to a real effect — there are no decorative widgets.
+Every control is wired to a real effect — there are no decorative widgets. The whole
+interface is iconified with a built-in vector icon set (48 hand-drawn glyphs painted with
+egui primitives — no icon fonts, no raster assets, DPI-crisp and theme-tintable).
+
+## GPU compatibility ("runs on any device")
+
+The engine process renders through wgpu and automatically picks the best backend the
+host provides: **Vulkan** on Linux/Windows/Android, **DX12** on Windows, **Metal** on
+macOS. Machines without a modern API can force the OpenGL backend, and VMs / old
+laptops transparently fall back to software rasterizers (lavapipe, llvmpipe, WARP):
+
+```sh
+bevyforge-runtime --backend vulkan   # force Vulkan
+bevyforge-runtime --backend gl       # force OpenGL (wgpu gles is compiled in)
+bevyforge-runtime --backend dx12     # force Direct3D 12 (Windows)
+FORGE_BACKEND=gl bevyforge           # same via environment variable
+```
+
+The editor itself uses plain OpenGL 3.2+ (glow), which works on essentially every GPU
+and driver stack, including Mesa software rendering. `PowerPreference::HighPerformance`
+steers adapter selection toward discrete GPUs when several exist.
 
 ## Building
 
@@ -55,7 +76,17 @@ target/release/bevyforge                 # creates/opens ~/BevyForgeProjects/Dem
 target/release/bevyforge --project path/to/project
 target/release/bevyforge --connect 48470 # attach to a running runtime
 bevyforge-runtime --screenshot shot.png --width 1920 --height 1080
+bevyforge-runtime --backend gl           # force a specific wgpu backend
 ```
+
+### Viewport manipulation
+
+- **W / E / R** — switch Move / Rotate / Scale tool (also toolbar buttons)
+- **Left-drag on a gizmo** — apply the manipulation (arrows = axis, squares = plane,
+  rings = rotation, centre = camera-plane move / uniform scale)
+- **Ctrl while dragging** — snap (0.25 m grid, 15° rotation, 0.05 scale steps)
+- **Right/Middle-drag** — orbit / pan; **Wheel** — zoom; **F** — frame selection
+- **Ctrl+Z / Ctrl+Y** — undo / redo every gizmo gesture exactly
 
 ## Architecture
 

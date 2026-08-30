@@ -145,7 +145,10 @@ pub fn spawn_relay(
                     }
                 }
                 Ok(_) => { /* wrong direction; ignore */ }
-                Err(_) => return, // disconnected
+                Err(e) => {
+                    eprintln!("[relay] reader exit: {e}");
+                    return; // disconnected
+                }
             }
         });
 

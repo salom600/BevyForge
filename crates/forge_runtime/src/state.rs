@@ -136,3 +136,7 @@ pub struct ScenePath(pub Option<String>);
 /// --init-demo: author the design-mirroring starter scene, save and exit.
 #[derive(Debug, Default, Resource)]
 pub struct InitDemo(pub bool);
+
+/// Transform captured at gizmo-drag start (for exact undo pairs).
+#[derive(Debug, Default, Resource)]
+pub struct GestureSnapshot(pub Option<forge_ipc::TransformAbs>);

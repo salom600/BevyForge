@@ -11,6 +11,7 @@
 //! ```
 
 mod animation;
+mod camera_info;
 mod capture;
 mod commands;
 mod env;
@@ -44,6 +45,9 @@ fn main() -> anyhow::Result<()> {
     let mut init_demo = false;
     let mut width = 1920u32;
     let mut height = 1080u32;
+    // wgpu backend selection: "vulkan" | "gl" | "dx12" | "metal" | "all".
+    // Empty means "let wgpu decide" (works on every supported platform).
+    let mut backend = std::env::var("FORGE_BACKEND").unwrap_or_default();
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -56,6 +60,7 @@ fn main() -> anyhow::Result<()> {
             "--init-demo" => init_demo = true,
             "--width" => width = args.next().and_then(|v| v.parse().ok()).unwrap_or(width),
             "--height" => height = args.next().and_then(|v| v.parse().ok()).unwrap_or(height),
+            "--backend" => backend = args.next().unwrap_or_default(),
             "--version" => {
                 println!("bevyforge-runtime {} (bevy {ENGINE_VERSION})", env!("CARGO_PKG_VERSION"));
                 return Ok(());
@@ -85,6 +90,7 @@ fn main() -> anyhow::Result<()> {
     let screenshot_mode = screenshot.clone();
     let init_demo_flag = init_demo;
     let _shot_size = state::ViewportSize { width, height };
+    let backends = parse_backends(&backend);
 
     let mut app = App::new();
     app.add_plugins(
@@ -95,6 +101,17 @@ fn main() -> anyhow::Result<()> {
                 ..default()
             })
             .set(AssetPlugin::default())
+            .set(bevy::render::RenderPlugin {
+                render_creation: bevy::render::settings::RenderCreation::Automatic(
+                    Box::new(bevy::render::settings::WgpuSettings {
+                        backends,
+                        power_preference:
+                            bevy::render::settings::PowerPreference::HighPerformance,
+                        ..default()
+                    }),
+                ),
+                ..default()
+            })
             .set(LogPlugin {
                 filter: "wgpu=error,naga=warn,bevy_asset=warn".to_string(),
                 level: bevy::log::Level::INFO,
@@ -118,6 +135,8 @@ fn main() -> anyhow::Result<()> {
     .insert_resource(PlaySnapshot::default())
     .insert_resource(state::PendingScreenshot::default())
     .insert_resource(ViewportSize { width: 1280, height: 720 })
+    .insert_resource(camera_info::LastCameraInfo::default())
+    .insert_resource(state::GestureSnapshot::default())
     .insert_resource(state::StartupShot {
         path: screenshot_mode.clone(),
         width,
@@ -149,6 +168,7 @@ fn main() -> anyhow::Result<()> {
     .add_systems(
         PostUpdate,
         (
+            camera_info::push_camera_info,
             scene_io::push_hierarchy,
             factory::push_selected_components,
             animation::push_anim_state,
@@ -242,5 +262,32 @@ fn startup_scene(world: &mut World) {
             Err(e) => warn!("demo save failed: {e:#}"),
         }
         world.write_message(AppExit::Success);
+    }
+}
+
+/// Parse a `--backend` / `FORGE_BACKEND` value into a wgpu `Backends` mask.
+///
+/// Accepted values (case-insensitive): `vulkan`, `gl`/`opengl`, `dx12`,
+/// `metal`, `all`. The empty string / `all` / `auto` allows every backend,
+/// letting wgpu apply its own default adapter selection — Vulkan on Linux,
+/// DX12 on Windows, Metal on macOS. This is what makes the engine run on any
+/// GPU: machines without Vulkan can force `--backend gl`, and VMs / old
+/// laptops fall back to software rasterizers (lavapipe / llvmpipe / WARP)
+/// automatically. Never returns `None`: an empty mask would disable the
+/// render app entirely.
+fn parse_backends(spec: &str) -> Option<bevy::render::settings::Backends> {
+    use bevy::render::settings::Backends;
+    match spec.trim().to_lowercase().as_str() {
+        // wgpu applies its own default adapter selection when all backends are
+        // allowed (Vulkan on Linux, DX12 on Windows, Metal on macOS).
+        "" | "all" | "auto" => Some(Backends::all()),
+        "vulkan" | "vk" => Some(Backends::VULKAN),
+        "gl" | "opengl" | "gles" => Some(Backends::GL),
+        "dx12" | "d3d12" | "directx" => Some(Backends::DX12),
+        "metal" | "mtl" => Some(Backends::METAL),
+        other => {
+            eprintln!("bevyforge-runtime: unknown backend '{other}', using default selection");
+            Some(Backends::all())
+        }
     }
 }
