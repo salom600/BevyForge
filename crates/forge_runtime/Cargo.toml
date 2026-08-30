@@ -1,0 +1,27 @@
+[package]
+name = "forge_runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "BevyForge runtime: headless Bevy engine process owning the ECS World, rendering offscreen frames for the editor"
+
+[[bin]]
+name = "bevyforge-runtime"
+path = "src/main.rs"
+
+[dependencies]
+forge_ipc = { workspace = true }
+forge_scripts = { workspace = true }
+serde = { workspace = true }
+anyhow = { workspace = true }
+crossbeam-channel = { workspace = true }
+ron = "0.10"
+image = { version = "0.25", default-features = false, features = ["png"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry"] }
+# Feature-unification hook: bevy 0.19 compiles wgpu WITHOUT the GLES (GL)
+# backend; adding the same wgpu crate with `gles` turns the GL backend on for
+# the whole graph, which lets the runtime run on software GL (llvmpipe).
+wgpu = { version = "29", default-features = false, features = ["gles"] }
+bevy.workspace = true

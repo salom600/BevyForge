@@ -1,0 +1,89 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build-linux:
+    name: Linux x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build (release)
+        run: cargo build --release --workspace
+
+      - name: Run unit tests
+        run: cargo test --release -p forge_ipc -p forge_editor_core -p forge_scripts -p forge_runtime
+
+      - name: Package artifacts
+        run: |
+          mkdir -p dist/BevyForge-linux-x64
+          cp target/release/bevyforge target/release/bevyforge-runtime dist/BevyForge-linux-x64/
+          cp -r project dist/BevyForge-linux-x64/project
+          cp README.md LICENSE-MIT LICENSE-APACHE dist/BevyForge-linux-x64/
+          cp LICENSE-MIT LICENSE-APACHE dist/BevyForge-linux-x64/ 2>/dev/null || true
+          tar -czf BevyForge-${{ github.ref_name }}-linux-x64.tar.gz -C dist BevyForge-linux-x64
+          sha256sum BevyForge-${{ github.ref_name }}-linux-x64.tar.gz > BevyForge-linux-x64.tar.gz.sha256
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BevyForge-linux-x64
+          path: |
+            BevyForge-*linux-x64.tar.gz
+            BevyForge-linux-x64.tar.gz.sha256
+          retention-days: 14
+          if-no-files-found: error
+
+  build-windows:
+    name: Windows x86_64
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build (release)
+        run: cargo build --release --workspace
+
+      - name: Run unit tests
+        run: cargo test --release -p forge_ipc -p forge_editor_core
+
+      - name: Package artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/BevyForge-windows-x64 | Out-Null
+          Copy-Item target/release/bevyforge.exe dist/BevyForge-windows-x64/
+          Copy-Item target/release/bevyforge-runtime.exe dist/BevyForge-windows-x64/
+          Copy-Item -Recurse -Force project dist/BevyForge-windows-x64/project
+          Copy-Item README.md, LICENSE-MIT, LICENSE-APACHE dist/BevyForge-windows-x64/
+          Compress-Archive -Path dist/BevyForge-windows-x64 -DestinationPath BevyForge-${{ github.ref_name }}-windows-x64.zip
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BevyForge-windows-x64
+          path: BevyForge-*windows-x64.zip
+          retention-days: 14
+          if-no-files-found: error

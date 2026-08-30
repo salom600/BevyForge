@@ -1,0 +1,17 @@
+# Rust / Cargo
+target/
+**/*.rs.bk
+Cargo.lock.orig
+
+# BevyForge project user files
+project/**/*.scn.ron.tmp
+screenshots/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.iml

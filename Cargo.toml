@@ -1,0 +1,52 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/forge_ipc",
+    "crates/forge_editor_core",
+    "crates/forge_scripts",
+    "crates/forge_runtime",
+    "crates/bevyforge",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["salom600"]
+
+[workspace.dependencies]
+forge_ipc = { path = "crates/forge_ipc" }
+forge_editor_core = { path = "crates/forge_editor_core" }
+forge_scripts = { path = "crates/forge_scripts" }
+serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", features = ["use-std", "alloc"] }
+anyhow = "1"
+crossbeam-channel = "0.5"
+bevy = { version = "0.19.1", default-features = false, features = [
+    "std",
+    "multi_threaded",
+    "bevy_asset",
+    "bevy_pbr",
+    "bevy_gizmos",
+    "bevy_gizmos_render",
+    "tonemapping_luts",
+    "mesh_picking",
+    "bevy_log",
+    "png",
+    "zstd_rust",
+] }
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "accesskit"] }
+egui = "0.36"
+
+[profile.dev]
+debug = 0
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 16
+opt-level = 3
+strip = "none"

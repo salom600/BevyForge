@@ -1,0 +1,28 @@
+[package]
+name = "bevyforge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "BevyForge editor: standalone egui desktop application for authoring Bevy scenes"
+
+[[bin]]
+name = "bevyforge"
+path = "src/main.rs"
+
+[dependencies]
+forge_ipc = { workspace = true }
+forge_editor_core = { workspace = true }
+serde = { workspace = true }
+anyhow = { workspace = true }
+crossbeam-channel = { workspace = true }
+eframe = { workspace = true }
+egui = { workspace = true }
+egui_extras = { version = "0.36", features = ["image"] }
+egui_code_editor = "0.4"
+egui-file-dialog = "0.15"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+rfd = { version = "0.17", optional = true }
+
+[features]
+native-dialogs = ["rfd"]
