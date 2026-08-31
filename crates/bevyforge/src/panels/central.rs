@@ -255,14 +255,26 @@ fn draw_frame(
     let Some((w, h, image)) = &app.state.frame else {
         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
             ui.centered_and_justified(|ui| {
-                ui.label(
-                    egui::RichText::new(if app.state.connected {
-                        "waiting for frames…"
-                    } else {
-                        "runtime offline"
-                    })
-                    .color(theme::TEXT_DIM),
-                );
+                ui.vertical_centered(|ui| {
+                    ui.label(
+                        egui::RichText::new(if app.state.connected {
+                            "waiting for frames…"
+                        } else {
+                            "Live preview offline — the engine renders here when it connects"
+                        })
+                        .color(theme::TEXT_DIM),
+                    );
+                    if !app.state.connected {
+                        ui.label(
+                            egui::RichText::new(
+                                "You can keep editing: hierarchy, inspector, gizmos, save — \
+                                 all changes sync to the engine automatically.",
+                            )
+                            .small()
+                            .color(theme::TEXT_DIM),
+                        );
+                    }
+                });
             });
         });
         let resp = ui.interact(rect, ui.id().with("viewport_wait"), egui::Sense::click_and_drag());

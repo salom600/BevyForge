@@ -34,6 +34,62 @@ impl Mat4 {
         ])
     }
 
+    /// Column-major matrix product `self * rhs` (apply `rhs` first).
+    pub fn mul(&self, rhs: &Mat4) -> Mat4 {
+        let a = &self.0;
+        let b = &rhs.0;
+        let mut o = [0.0f32; 16];
+        for col in 0..4 {
+            for row in 0..4 {
+                o[col * 4 + row] = a[row] * b[col * 4]
+                    + a[4 + row] * b[col * 4 + 1]
+                    + a[8 + row] * b[col * 4 + 2]
+                    + a[12 + row] * b[col * 4 + 3];
+            }
+        }
+        Mat4(o)
+    }
+
+    /// Right-handed view matrix (glam `Mat4::look_at_rh` equivalent).
+    pub fn look_at_rh(eye: [f32; 3], target: [f32; 3], up: [f32; 3]) -> Mat4 {
+        let sub = |a: [f32; 3], b: [f32; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+        let norm = |v: [f32; 3]| {
+            let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+            if l < 1e-6 {
+                [0.0, 0.0, 0.0]
+            } else {
+                [v[0] / l, v[1] / l, v[2] / l]
+            }
+        };
+        let cross = |a: [f32; 3], b: [f32; 3]| {
+            [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+        };
+        let f = norm(sub(target, eye));
+        let r = norm(cross(f, up));
+        let u = cross(r, f);
+        let d = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        Mat4([
+            r[0], u[0], -f[0], 0.0, //
+            r[1], u[1], -f[1], 0.0, //
+            r[2], u[2], -f[2], 0.0, //
+            -d(r, eye), -d(u, eye), d(f, eye), 1.0,
+        ])
+    }
+
+    /// Right-handed perspective projection (glam `perspective_rh` equivalent;
+    /// NDC depth −1..1 — depth direction is irrelevant for gizmo screen
+    /// projection, which only uses x/y/w).
+    pub fn perspective_rh(fov_y_rad: f32, aspect: f32, near: f32, far: f32) -> Mat4 {
+        let f = 1.0 / fov_y_rad.tan();
+        let nf = 1.0 / (near - far);
+        Mat4([
+            f / aspect, 0.0, 0.0, 0.0, //
+            0.0, f, 0.0, 0.0, //
+            0.0, 0.0, (far + near) * nf, -1.0, //
+            0.0, 0.0, 2.0 * far * near * nf, 0.0,
+        ])
+    }
+
     /// Multiply by a 4-vector.
     pub fn mul_vec4(&self, v: [f32; 4]) -> [f32; 4] {
         let m = &self.0;

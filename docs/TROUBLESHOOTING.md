@@ -9,17 +9,40 @@ by side:
 | `bevyforge-runtime` / `bevyforge-runtime.exe` | The render engine (Bevy 0.19 / wgpu) that owns the scene, renders the viewport and runs Play mode |
 
 The editor spawns the runtime automatically. If anything goes wrong the editor
-now tells you **exactly what happened** in a red banner at the top of the
-window, in the status bar, and in the Console panel — it never silently shows
-dead buttons.
+tells you **exactly what happened** in a red banner at the top of the window, in
+the status bar, and in the Console panel.
+
+**Since 0.2.2 the editor is never a hollow shell**: even with the engine down,
+all *editing* (hierarchy, creation, inspector, gizmos, undo, save/open) works on
+an internal scene document and is synced to the engine automatically the moment
+it connects. Only *Play mode, click-picking in the viewport and screenshots*
+need the engine itself.
+
+---
+
+## 0. Quick self-diagnosis (do this first)
+
+Run, from a terminal in the extracted folder:
+
+```
+bevyforge --doctor
+```
+
+It checks every link in the chain (paths → runtime binary → engine spawn → GPU
+backends → IPC handshake), prints `PASS/FAIL` per item and writes
+`bevyforge-doctor-report.txt` next to the executable. Send that file when asking
+for help — it answers 90% of questions immediately.
+
+Every launch also appends to `bevyforge.log` (next to the executable, or
+`%LOCALAPPDATA%\BevyForge\bevyforge.log` when the folder is read-only).
 
 ---
 
 ## 1. “Editor opens but buttons do nothing”
 
-This is always the engine process failing to start. Since 0.2.1 the editor
-shows a red banner with the exact reason and retries automatically every few
-seconds. The most common causes:
+Since 0.2.2 editing buttons **always work** (offline document mode). If they
+appear dead on a version *before* 0.2.2, this is always the engine process
+failing to start. The most common causes:
 
 ### a) The runtime executable is missing
 You extracted or moved `bevyforge.exe` **alone** out of the archive, or your

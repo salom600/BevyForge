@@ -12,9 +12,6 @@ use bevy::light::{DirectionalLight, PointLight, SpotLight};
 use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
 
-use forge_ipc::{
-    AnimTrack, EnvironmentSettings, MeshPrimitive,
-};
 use ron::ser::PrettyConfig;
 
 use crate::factory;
@@ -25,100 +22,10 @@ use crate::state::{
 use forge_scripts as scripts;
 
 // ---------------------------------------------------------------------------
-// File model
+// File model — types live in forge_ipc::scene_doc (shared with the editor)
 // ---------------------------------------------------------------------------
 
-/// Root document of a `*.scn.ron` file.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ForgeScene {
-    pub engine: String,
-    pub environment: EnvironmentSettings,
-    #[serde(default)]
-    pub animation: SceneAnimation,
-    pub entities: Vec<SceneEntity>,
-}
-
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct SceneAnimation {
-    #[serde(default)]
-    pub duration: f32,
-    #[serde(default)]
-    pub entries: Vec<SceneAnimEntry>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SceneAnimEntry {
-    pub name: String,
-    pub tracks: Vec<(AnimTrack, Vec<(f32, [f32; 3])>)>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SceneEntity {
-    pub name: String,
-    #[serde(default)]
-    pub parent: Option<String>,
-    pub kind: SceneEntityKind,
-    /// (translation, rotation euler XYZ deg, scale)
-    pub transform: ([f32; 3], [f32; 3], [f32; 3]),
-    #[serde(default = "default_true")]
-    pub visible: bool,
-    #[serde(default)]
-    pub locked: bool,
-    #[serde(default)]
-    pub material: Option<SceneMaterial>,
-    #[serde(default)]
-    pub camera: Option<SceneCamera>,
-    #[serde(default)]
-    pub light: Option<SceneLight>,
-    #[serde(default)]
-    pub scripts: Vec<SceneScript>,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum SceneEntityKind {
-    Empty,
-    Mesh(MeshPrimitive),
-    Camera,
-    DirectionalLight,
-    PointLight,
-    SpotLight,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SceneMaterial {
-    pub base_color: [f32; 4],
-    pub metallic: f32,
-    pub roughness: f32,
-    pub emissive: [f32; 4],
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SceneCamera {
-    pub fov_deg: f32,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum SceneLight {
-    Directional { color: [f32; 4], illuminance: f32, shadows: bool },
-    Point { color: [f32; 4], intensity: f32, radius: f32, shadows: bool },
-    Spot { color: [f32; 4], intensity: f32, range: f32, outer_angle_deg: f32, shadows: bool },
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum SceneScript {
-    Rotator { speed: [f32; 3] },
-    Orbiter { center: [f32; 3], radius: f32, speed: f32 },
-    LinearMover { velocity: [f32; 3], ping_pong: bool },
-    PingPongMover { offset: [f32; 3], period: f32 },
-    Player { speed: f32, jump_force: f32, sprint_multiplier: f32 },
-    CharacterController { height: f32, radius: f32, step_offset: f32, slope_limit: f32 },
-    Health { current: f32, max: f32 },
-    Inventory { slots: u32 },
-}
+pub use forge_ipc::scene_doc::*;
 
 // ---------------------------------------------------------------------------
 // Capture (world -> ForgeScene)
@@ -722,6 +629,7 @@ pub fn set_play_mode(world: &mut World, playing: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use forge_ipc::{EnvironmentSettings, MeshPrimitive};
 
     #[test]
     fn scene_roundtrips_through_ron() {

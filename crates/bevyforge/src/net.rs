@@ -52,12 +52,13 @@ impl Net {
 
     /// Spawn the runtime child process and connect to its IPC port.
     ///
-    /// The handshake window is generous (45 s) because machines falling back
-    /// to software rendering compile shaders on the CPU at first boot.
+    /// Runs on a worker thread (never the UI thread). The handshake window
+    /// covers software-rendering shader compile on slow machines; the GPU
+    /// fallback chain multiplies this, so keep it bounded.
     pub fn spawn_runtime(project_dir: &std::path::Path, port: u16) -> anyhow::Result<Net> {
         let spawner = RuntimeSpawner { binary: None, port, ..Default::default() };
         let handle: RuntimeHandle =
-            spawner.spawn(project_dir, std::time::Duration::from_secs(45))?;
+            spawner.spawn(project_dir, std::time::Duration::from_secs(15))?;
         let child = handle.child;
         let port = handle.port;
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<EditorToRuntime>();

@@ -361,6 +361,23 @@ fn execute_one(
                 Err(e) => notify(channels, LogLevel::Error, format!("Save failed: {e:#}")),
             }
         }
+        EditorToRuntime::LoadSceneDoc { scene } => {
+            // The editor authored this scene while the engine was offline and
+            // pushes it now that the connection is back. Entity ids are
+            // re-assigned here; the editor follows up with RequestFullState.
+            if world.resource::<crate::state::PlayState>().playing {
+                crate::scene_io::set_play_mode(world, false);
+            }
+            let count = scene_io::apply_scene(world, &scene);
+            world.resource_mut::<Selection>().0 = None;
+            world.resource_mut::<ScenePath>().0 = None;
+            flags.all_dirty();
+            notify(
+                channels,
+                LogLevel::Info,
+                format!("Synced {} offline edit(s) from the editor", count),
+            );
+        }
         EditorToRuntime::SetPlayMode { playing } => {
             scene_io::set_play_mode(world, playing);
             flags.all_dirty();

@@ -75,6 +75,36 @@ and GPU name are shown live in the editor status bar.
 a *Retry now* button; see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) (also
 bundled in every artifact).
 
+## The editor works even without the engine (since 0.2.2)
+
+The engine process owns the world, but it no longer owns the *editor*. Since 0.2.2
+the editor keeps its own scene document (the same `*.scn.ron` format the engine
+uses) and applies every editing command locally while the engine is down:
+
+- startup **never blocks on the engine** — the window opens instantly and the
+  engine spawn runs on a background thread with auto-retry;
+- hierarchy, creation, duplication, deletion, rename, reparent, inspector edits,
+  add/remove components, gizmo drags, undo/redo, environment and **save/open scene**
+  all genuinely work with the engine offline;
+- when the engine connects, the document is pushed to it automatically
+  (`LoadSceneDoc`) and Play mode / live preview resume — offline edits are never
+  lost, even across engine crashes (they are re-pushed on every reconnect until
+  saved);
+- engine-only actions (Play, click-picking, screenshots) say so honestly with a
+  toast instead of doing nothing.
+
+### Self-diagnostics
+
+```sh
+bevyforge --doctor      # headless self-test: paths, runtime discovery,
+                        # engine spawn, IPC handshake, project scene
+```
+
+It prints `PASS/FAIL` per check, writes `bevyforge-doctor-report.txt` next to the
+executable (share it when asking for help), and every run appends to
+`bevyforge.log` next to the executable (or `%LOCALAPPDATA%\BevyForge\` when the
+folder is read-only).
+
 ## Building
 
 ```sh

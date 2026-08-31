@@ -20,12 +20,18 @@
 
 #![allow(clippy::module_inception)]
 
+pub mod math;
+pub mod scene_doc;
 pub mod transport;
 
+pub use scene_doc::{
+    ForgeScene, SceneAnimation, SceneAnimEntry, SceneCamera, SceneEntity, SceneEntityKind,
+    SceneLight, SceneMaterial, SceneScript,
+};
 pub use transport::{connect, listen, send_on_stream, Connection};
 
 /// BevyForge protocol version. Bumped whenever a message type changes meaning.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Default TCP port the runtime listens on when none is requested.
 pub const DEFAULT_PORT: u16 = 48470;
@@ -502,6 +508,10 @@ pub enum EditorToRuntime {
     NewScene,
     OpenScene { path: String },
     SaveScene { path: String },
+    /// Replace the runtime world with this scene document. Used by the editor
+    /// to push edits it made while the engine was offline; entity ids are
+    /// re-assigned by the runtime, so a full state refresh follows.
+    LoadSceneDoc { scene: ForgeScene },
     /// Toggle play mode; runtime snapshots the world and enables game systems.
     SetPlayMode { playing: bool },
     /// Request a ray cast through the viewport; answers `PickResult`.

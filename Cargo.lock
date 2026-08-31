@@ -1388,7 +1388,7 @@ dependencies = [
 
 [[package]]
 name = "bevyforge"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -1401,6 +1401,7 @@ dependencies = [
  "forge_ipc",
  "image",
  "rfd",
+ "ron 0.10.1",
  "serde",
 ]
 
@@ -2434,7 +2435,7 @@ checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
 name = "forge_editor_core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "forge_ipc",
@@ -2445,7 +2446,7 @@ dependencies = [
 
 [[package]]
 name = "forge_ipc"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -2455,7 +2456,7 @@ dependencies = [
 
 [[package]]
 name = "forge_runtime"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "bevy",
@@ -2472,7 +2473,7 @@ dependencies = [
 
 [[package]]
 name = "forge_scripts"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "bevy",
 ]

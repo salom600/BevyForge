@@ -10,6 +10,7 @@ use forge_ipc::{
 };
 
 use crate::net::{Net, NetEvent};
+use crate::offline::OfflineScene;
 use crate::state::{DockTab, EditorState, ScriptDoc};
 use crate::panels;
 
@@ -52,6 +53,12 @@ pub struct BevyForgeApp {
     pub last_offline_warn: Option<Instant>,
     /// Set when the app is shutting down: suppress auto-respawn.
     pub closing: bool,
+    /// The editor's own scene document, authoritative while the engine is
+    /// offline. Makes every editing button genuinely work without the
+    /// runtime; shipped to the engine via `LoadSceneDoc` on reconnect.
+    pub offline: OfflineScene,
+    /// Port to attach to on the first frame (`--connect`), run on a worker.
+    pub initial_attach: Option<u16>,
 }
 
 /// An in-flight `cargo check` for the scripts crate.
@@ -86,16 +93,22 @@ impl BevyForgeApp {
         net: Option<Net>,
         spawn_error: Option<String>,
         exit_after: Option<f64>,
+        initial_attach: Option<u16>,
     ) -> Self {
         crate::theme::install(&cc.egui_ctx);
         let mut state = EditorState::new();
-        let offline = net.as_ref().map(|n| n.is_offline()).unwrap_or(true);
-        state.status_message = if offline {
-            "Engine offline — retrying…".into()
-        } else if net.is_some() {
-            "Connecting…".into()
+        // The offline scene document is seeded from the project's main scene
+        // file BEFORE the engine exists, so the hierarchy/inspector are alive
+        // from the very first frame.
+        let offline = OfflineScene::from_project(project.as_ref());
+        let (seed_hierarchy, seed_env) = (offline.hierarchy(None), offline.doc.environment.clone());
+        state.hierarchy = seed_hierarchy;
+        state.env = seed_env;
+        let net_offline = net.as_ref().map(|n| n.is_offline()).unwrap_or(true);
+        state.status_message = if net_offline {
+            "Engine starting… (editing works meanwhile)".into()
         } else {
-            "No runtime".into()
+            "Connecting…".into()
         };
         state.logs.push(forge_ipc::LogEntry {
             level: forge_ipc::LogLevel::Info,
@@ -153,12 +166,14 @@ impl BevyForgeApp {
             asset_search: String::new(),
             ui_ctx: None,
             runtime_port: forge_ipc::DEFAULT_PORT,
-            next_retry: if offline { Some(Instant::now() + Duration::from_secs(2)) } else { None },
+            next_retry: if net_offline { Some(Instant::now() + Duration::from_millis(200)) } else { None },
             retry_delay: Duration::from_secs(2),
             respawn_rx: None,
             spawn_error,
             last_offline_warn: None,
             closing: false,
+            offline,
+            initial_attach,
         }
     }
 
@@ -168,19 +183,33 @@ impl BevyForgeApp {
 
     pub fn cmd(&mut self, cmd: EditorToRuntime) {
         if self.net.as_ref().map(|n| n.is_offline()).unwrap_or(true) {
-            // Be honest: the engine is not running, this action does nothing.
-            // Warn at most every 3 s so click storms stay readable.
-            let now = Instant::now();
-            if self
-                .last_offline_warn
-                .map(|t| now.duration_since(t) > Duration::from_secs(3))
-                .unwrap_or(true)
-            {
-                self.last_offline_warn = Some(now);
-                self.state.push_toast(
-                    LogLevel::Warn,
-                    "Engine offline — action skipped (auto-retry active, see banner)",
-                );
+            // OFFLINE: apply editing commands to the local scene document so
+            // the editor stays genuinely usable; only engine-bound commands
+            // (play, picking, screenshots) are refused with a toast.
+            let feedback = self.offline.apply(&cmd);
+            if let Some(id) = feedback.spawned {
+                self.state.selected = Some(id);
+                self.state.expanded.insert(id);
+            }
+            if let Some((level, message)) = feedback.notice {
+                self.state.push_toast(level, message);
+            }
+            if let Some((label, undo, redo)) = feedback.gesture_done {
+                self.push_undo_only(&label, undo, redo);
+            }
+            if feedback.needs_engine {
+                let now = Instant::now();
+                if self
+                    .last_offline_warn
+                    .map(|t| now.duration_since(t) > Duration::from_secs(3))
+                    .unwrap_or(true)
+                {
+                    self.last_offline_warn = Some(now);
+                    self.state.push_toast(
+                        LogLevel::Warn,
+                        "This action needs the render engine (auto-retry active, see banner)",
+                    );
+                }
             }
             return;
         }
@@ -214,6 +243,7 @@ impl BevyForgeApp {
                     self.retry_delay = Duration::from_secs(2);
                     self.spawn_error = None;
                     self.state.status_message = "Connecting…".into();
+                    crate::logging::info("engine process spawned and handshake OK");
                     self.state
                         .push_toast(LogLevel::Info, "Engine started — connecting…");
                     return;
@@ -221,6 +251,7 @@ impl BevyForgeApp {
                 Ok(Err(e)) => {
                     self.respawn_rx = None;
                     let msg = format!("{e:#}");
+                    crate::logging::warn(&format!("engine spawn failed: {msg}"));
                     if self.spawn_error.as_deref() != Some(msg.as_str()) {
                         self.state.logs.push(forge_ipc::LogEntry {
                             level: forge_ipc::LogLevel::Error,
@@ -244,6 +275,18 @@ impl BevyForgeApp {
         if Instant::now() < at {
             return;
         }
+
+        // One-shot --connect attach, also on a worker thread.
+        if let Some(port) = self.initial_attach.take() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(crate::net::Net::attach(port));
+            });
+            self.respawn_rx = Some(rx);
+            self.state.status_message = "Attaching to engine…".into();
+            return;
+        }
+
         self.next_retry = Some(Instant::now() + self.retry_delay);
         self.retry_delay = (self.retry_delay * 2).min(Duration::from_secs(10));
 
@@ -253,12 +296,13 @@ impl BevyForgeApp {
             .map(|p| p.root.clone())
             .unwrap_or_default();
         let port = self.runtime_port;
+        crate::logging::info(&format!("spawning bevyforge-runtime (project {}, port {port})", root.display()));
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let _ = tx.send(crate::net::Net::spawn_runtime(&root, port));
         });
         self.respawn_rx = Some(rx);
-        self.state.status_message = "Engine offline — starting…".into();
+        self.state.status_message = "Engine starting… (editing works meanwhile)".into();
     }
 
     /// Kill and respawn the runtime (status-bar button / menu action).
@@ -320,6 +364,28 @@ impl BevyForgeApp {
                 NetEvent::Connected => {
                     self.state.connected = true;
                     self.state.status_message = "Ready".into();
+                    // If the scene document diverged from disk while the
+                    // engine was down (offline edits or a crash losing the
+                    // world), push it now; the runtime rebuilds its world and
+                    // re-assigns entity ids.
+                    if self.offline.has_unsynced_edits() {
+                        let scene = self.offline.to_scene();
+                        let count = scene.entities.len();
+                        if let Some(net) = &self.net {
+                            net.send(EditorToRuntime::LoadSceneDoc { scene });
+                        }
+                        self.undo.clear();
+                        self.state.selected = None;
+                        self.state.selected_name.clear();
+                        self.state.components.clear();
+                        self.state.scene_dirty = true;
+                        self.state.push_toast(
+                            LogLevel::Info,
+                            format!(
+                                "Synced {count} offline edit(s) to the engine — undo history reset"
+                            ),
+                        );
+                    }
                     self.cmd(EditorToRuntime::Hello);
                     self.cmd(EditorToRuntime::RequestFullState);
                     self.send_camera();
@@ -328,6 +394,7 @@ impl BevyForgeApp {
                     self.state.connected = false;
                     self.state.playing = false;
                     self.state.status_message = format!("Runtime offline — {reason}");
+                    crate::logging::warn(&format!("runtime link lost: {reason}"));
                 }
                 NetEvent::RuntimeExited(code) => {
                     self.state.connected = false;
@@ -343,6 +410,7 @@ impl BevyForgeApp {
                     }
                     self.net = Some(crate::net::Net::offline());
                     self.spawn_error = Some(format!("the render engine exited unexpectedly (code {code:?})"));
+                    crate::logging::error(&format!("runtime exited unexpectedly (code {code:?})"));
                     self.state.logs.push(forge_ipc::LogEntry {
                         level: forge_ipc::LogLevel::Error,
                         time: crate::panels::clock_hms(),
@@ -480,6 +548,65 @@ impl BevyForgeApp {
                 }
             }
         }
+    }
+
+    /// Refresh the UI mirror (hierarchy/inspector/env/scene info) from the
+    /// offline document whenever it changed. Cheap; runs at most once per
+    /// frame and only when a command actually touched the doc.
+    fn sync_offline_mirror(&mut self) {
+        if !self.offline.take_mirror_dirty() {
+            // Still refresh the offline camera each frame so gizmos track the
+            // orbit rig without the engine.
+            if self.net.as_ref().map(|n| n.is_offline()).unwrap_or(true) {
+                self.update_offline_camera();
+            }
+            return;
+        }
+        let selected = self.state.selected;
+        let nodes = self.offline.hierarchy(selected);
+        for node in &nodes {
+            if node.depth < 1 {
+                self.state.expanded.insert(node.id);
+            }
+        }
+        self.state.hierarchy = nodes;
+        let found = selected.and_then(|id| self.offline.components_for(id));
+        match found {
+            Some((name, components)) => {
+                self.state.selected_name = name;
+                self.state.components = components;
+            }
+            None => {
+                if self.state.selected.is_some() {
+                    self.state.selected = None;
+                    self.state.selected_name.clear();
+                    self.state.components.clear();
+                }
+            }
+        }
+        self.state.scene_path = self.offline.scene_path();
+        self.state.scene_dirty = self.offline.has_unsynced_edits();
+        self.state.env = self.offline.doc.environment.clone();
+        self.update_offline_camera();
+    }
+
+    /// While offline the runtime cannot report `CameraInfo`; derive the
+    /// view-projection from the editor rig so the gizmo stays usable.
+    fn update_offline_camera(&mut self) {
+        if self.net.as_ref().map(|n| !n.is_offline()).unwrap_or(false) {
+            return; // engine online → CameraInfo is authoritative
+        }
+        let (target, distance, yaw, pitch) = self.state.camera_rig;
+        let (yr, pr) = (yaw.to_radians(), pitch.clamp(-89.0, 89.0).to_radians());
+        let eye = [
+            distance * pr.cos() * yr.cos() + target[0],
+            distance * pr.sin() + target[1],
+            distance * pr.cos() * yr.sin() + target[2],
+        ];
+        let view = crate::gizmo::Mat4::look_at_rh(eye, target, [0.0, 1.0, 0.0]);
+        let proj = crate::gizmo::Mat4::perspective_rh(45.0_f32.to_radians(), 16.0 / 9.0, 0.1, 2000.0);
+        self.state.camera_eye = eye;
+        self.state.camera_vp = Some(proj.mul(&view));
     }
 
     pub fn send_camera(&mut self) {
@@ -671,6 +798,11 @@ impl BevyForgeApp {
     }
 
     pub fn toggle_play(&mut self) {
+        if self.net.as_ref().map(|n| n.is_offline()).unwrap_or(true) {
+            // Honest feedback without flipping the UI into a broken state.
+            self.cmd(EditorToRuntime::SetPlayMode { playing: true });
+            return;
+        }
         let target = !self.state.playing;
         self.state.playing = target;
         self.cmd(EditorToRuntime::SetPlayMode { playing: target });
@@ -693,6 +825,7 @@ impl eframe::App for BevyForgeApp {
 
         self.pump_network();
         self.pump_runtime_lifecycle();
+        self.sync_offline_mirror();
         if self.check_requested {
             self.check_requested = false;
             self.start_cargo_check();

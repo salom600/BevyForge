@@ -164,8 +164,15 @@ impl RuntimeSpawner {
         if !backend.is_empty() {
             cmd.arg("--backend").arg(backend);
         }
-        cmd.stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        // The runtime is a console-subsystem binary; without CREATE_NO_WINDOW
+        // Windows pops up a black console window for every engine spawn (and
+        // closing that console would kill the engine).
+        #[cfg(windows)]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
         let mut child = cmd
             .spawn()
             .with_context(|| format!("spawning {}", binary.display()))?;

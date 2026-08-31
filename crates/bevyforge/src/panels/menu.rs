@@ -437,10 +437,11 @@ pub fn offline_banner(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
                 crate::icons::paint(ui.painter(), icon, icon_rect, theme::RED);
 
                 ui.vertical(|ui| {
-                    ui.set_max_width(ui.available_width() - 220.0);
+                    ui.set_max_width(ui.available_width() - 320.0);
                     ui.label(
                         egui::RichText::new(
-                            "The BevyForge render engine is NOT running — every scene action is disabled.",
+                            "The render engine is not running — Play mode and the live preview \
+                             are paused, but ALL editing keeps working.",
                         )
                         .strong()
                         .color(theme::RED),
@@ -448,14 +449,23 @@ pub fn offline_banner(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
                     let reason = app
                         .spawn_error
                         .clone()
-                        .unwrap_or_else(|| "the engine process could not be started".into());
+                        .unwrap_or_else(|| "starting the engine process…".into());
                     ui.label(
                         egui::RichText::new(format!(
-                            "Reason: {reason}  ·  auto-retry every few seconds  ·  \
-                             make sure bevyforge-runtime sits next to bevyforge (extract the FULL archive)"
+                            "Engine status: {reason}  ·  auto-retry active  ·  \
+                             edits made here are synced automatically when the engine connects"
                         ))
                         .small()
                         .color(theme::TEXT),
+                    );
+                    ui.label(
+                        egui::RichText::new(
+                            "If this never clears: keep bevyforge and bevyforge-runtime in the SAME \
+                             folder, allow the runtime in Windows Defender (Protection history), \
+                             or run  bevyforge --doctor  for a shareable report.",
+                        )
+                        .small()
+                        .color(theme::TEXT_DIM),
                     );
                 });
 

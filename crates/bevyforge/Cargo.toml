@@ -21,6 +21,7 @@ egui = { workspace = true }
 egui_extras = { version = "0.36", features = ["image"] }
 egui_code_editor = "0.4"
 egui-file-dialog = "0.15"
+ron = "0.10"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 rfd = { version = "0.17", optional = true }
 

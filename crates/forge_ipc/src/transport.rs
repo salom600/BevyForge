@@ -138,7 +138,6 @@ pub fn spawn_relay(
                 .expect("listener nonblocking");
             match listener.accept() {
                 Ok((stream, _peer)) => {
-                    idle_since = std::time::Instant::now();
                     first_wait = false;
                     listener
                         .set_nonblocking(false)
