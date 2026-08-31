@@ -59,6 +59,10 @@ pub struct BevyForgeApp {
     pub offline: OfflineScene,
     /// Port to attach to on the first frame (`--connect`), run on a worker.
     pub initial_attach: Option<u16>,
+    /// Sandbox UI smoke-test hook (`FORGE_UI_TEST` env): dialog purpose to
+    /// auto-arm ~2 s after launch so an automated harness can screenshot and
+    /// complete the real menu flow. Never set in normal use.
+    pub ui_test_arm: Option<DialogPurpose>,
 }
 
 /// An in-flight `cargo check` for the scripts crate.
@@ -174,6 +178,13 @@ impl BevyForgeApp {
             closing: false,
             offline,
             initial_attach,
+            ui_test_arm: std::env::var("FORGE_UI_TEST").ok().and_then(|m| match m.as_str() {
+                "open_project" => Some(DialogPurpose::OpenProject),
+                "new_project" => Some(DialogPurpose::NewProject),
+                "open_scene" => Some(DialogPurpose::OpenScene),
+                "save_scene_as" => Some(DialogPurpose::SaveSceneAs),
+                _ => None,
+            }),
         }
     }
 
@@ -319,6 +330,224 @@ impl BevyForgeApp {
         self.next_retry = Some(Instant::now() + Duration::from_millis(300));
         self.state
             .push_toast(LogLevel::Info, "Restarting the render engine…");
+    }
+
+    // ------------------------------------------------------------------
+    // File dialogs (project & scene open/save) — armed by the Project menu,
+    // rendered and consumed by `pump_file_dialog` every frame.
+    // ------------------------------------------------------------------
+
+    /// Arm the shared file dialog for `purpose`, configuring title, start
+    /// directory and default file name for that purpose. The dialog is drawn
+    /// by `pump_file_dialog` on the following frames; a completed pick is
+    /// routed to `handle_dialog_pick`, a cancel simply leaves it closed.
+    pub fn arm_dialog(&mut self, purpose: DialogPurpose) {
+        let (start_dir, scenes_dir) = match self.project.as_ref() {
+            Some(p) => (
+                Some(
+                    p.root
+                        .parent()
+                        .map(|d| d.to_path_buf())
+                        .unwrap_or_else(|| p.root.clone()),
+                ),
+                Some(p.scenes_dir()),
+            ),
+            None => (None, None),
+        };
+        let cfg = self.file_dialog.config_mut();
+        match &purpose {
+            DialogPurpose::OpenProject => {
+                cfg.title = Some("Open project — choose the project folder".into());
+                if let Some(dir) = start_dir {
+                    cfg.initial_directory = dir;
+                }
+            }
+            DialogPurpose::NewProject => {
+                cfg.title = Some("New project — choose a folder for it".into());
+                if let Some(dir) = start_dir {
+                    cfg.initial_directory = dir;
+                }
+            }
+            DialogPurpose::OpenScene => {
+                cfg.title = Some("Open scene (.scn.ron)".into());
+                if scenes_dir.as_ref().is_some_and(|d| d.is_dir()) {
+                    cfg.initial_directory = scenes_dir.unwrap_or_default();
+                }
+            }
+            DialogPurpose::SaveSceneAs => {
+                cfg.title = Some("Save scene as".into());
+                if scenes_dir.as_ref().is_some_and(|d| d.is_dir()) {
+                    cfg.initial_directory = scenes_dir.unwrap_or_default();
+                }
+                cfg.default_file_name = "scene.scn.ron".into();
+            }
+        }
+        match purpose {
+            DialogPurpose::OpenProject | DialogPurpose::NewProject => self.file_dialog.pick_directory(),
+            DialogPurpose::OpenScene => self.file_dialog.pick_file(),
+            DialogPurpose::SaveSceneAs => self.file_dialog.save_file(),
+        }
+        self.console_log(
+            LogLevel::Info,
+            "dialog",
+            format!("{purpose:?} dialog armed"),
+        );
+        self.dialog = Some(purpose);
+    }
+
+    /// Render the armed file dialog (a cheap no-op while none is armed) and
+    /// route a completed pick to `handle_dialog_pick`. A cancelled dialog is
+    /// left armed-but-closed: it draws nothing and the next `arm_dialog`
+    /// reconfigures and reuses it.
+    pub fn pump_file_dialog(&mut self, ctx: &egui::Context) {
+        if self.dialog.is_none() {
+            return;
+        }
+        self.file_dialog.update(ctx);
+        if let Some(path) = self.file_dialog.take_picked() {
+            let purpose = self.dialog.take().expect("dialog purpose is Some");
+            self.console_log(
+                LogLevel::Info,
+                "dialog",
+                format!("picked: {}", path.display()),
+            );
+            self.handle_dialog_pick(purpose, path);
+        }
+    }
+
+    fn handle_dialog_pick(&mut self, purpose: DialogPurpose, path: std::path::PathBuf) {
+        match purpose {
+            DialogPurpose::OpenProject => self.open_project_at(&path),
+            DialogPurpose::NewProject => self.create_project_at(&path),
+            DialogPurpose::OpenScene => self.open_scene_at(path),
+            DialogPurpose::SaveSceneAs => self.save_scene_at(path),
+        }
+    }
+
+    /// Make the folder picked in the "Open Project…" dialog the active
+    /// project. Any existing folder works — a missing manifest gets a
+    /// default one (same behavior as the CLI).
+    pub fn open_project_at(&mut self, dir: &std::path::Path) {
+        match Project::open(dir) {
+            Ok(project) => self.switch_project(project),
+            Err(e) => {
+                let msg = format!("Opening project failed: {e:#}");
+                self.state.push_toast(LogLevel::Error, msg.clone());
+                self.console_log(LogLevel::Error, "project", msg);
+            }
+        }
+    }
+
+    /// Create a fresh project in the folder picked in the "New Project…"
+    /// dialog and make it active. A folder that already holds a project is
+    /// opened as-is instead (idempotent, never destroys content).
+    pub fn create_project_at(&mut self, dir: &std::path::Path) {
+        if dir.join("BevyForge.toml").exists() {
+            self.open_project_at(dir);
+            return;
+        }
+        let name = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "NewProject".into());
+        match Project::create(dir, &name) {
+            Ok(project) => {
+                self.console_log(
+                    LogLevel::Info,
+                    "project",
+                    format!("created '{name}' in {}", dir.display()),
+                );
+                self.switch_project(project);
+            }
+            Err(e) => {
+                let msg = format!("Creating project failed: {e:#}");
+                self.state.push_toast(LogLevel::Error, msg.clone());
+                self.console_log(LogLevel::Error, "project", msg);
+            }
+        }
+    }
+
+    /// Make `project` the active one: reseed the offline scene from its main
+    /// scene file, point save/load defaults at it and restart the engine so
+    /// the fresh runtime process runs with the new project root.
+    fn switch_project(&mut self, project: Project) {
+        let main_scene = project.resolve_scene("");
+        self.console_log(
+            LogLevel::Info,
+            "project",
+            format!(
+                "active: {} ({})",
+                project.manifest.name,
+                project.root.display()
+            ),
+        );
+        self.offline = OfflineScene::from_project(Some(&project));
+        self.state.hierarchy = self.offline.hierarchy(None);
+        self.state.env = self.offline.doc.environment.clone();
+        self.state.scene_path = Some(main_scene.to_string_lossy().to_string());
+        self.state.selected = None;
+        self.state.components.clear();
+        self.undo.clear();
+        self.project = Some(project);
+        self.restart_runtime();
+        let name = self
+            .project
+            .as_ref()
+            .map(|p| p.manifest.name.clone())
+            .unwrap_or_default();
+        self.state
+            .push_toast(LogLevel::Info, format!("Project '{name}' active — engine restarting"));
+    }
+
+    /// Route the "Open Scene…" pick through the normal scene pipeline
+    /// (engine while online, offline document otherwise).
+    pub fn open_scene_at(&mut self, path: std::path::PathBuf) {
+        if !path.is_file() {
+            let msg = format!("Scene not found: {}", path.display());
+            self.state.push_toast(LogLevel::Error, msg.clone());
+            self.console_log(LogLevel::Error, "scene", msg);
+            return;
+        }
+        let path = path.to_string_lossy().to_string();
+        self.state.scene_path = Some(path.clone());
+        self.console_log(LogLevel::Info, "scene", format!("opening {path}"));
+        self.open_scene(path);
+    }
+
+    /// Route the "Save Scene As…" pick; the chosen path becomes the new
+    /// default save target for Ctrl+S as well.
+    pub fn save_scene_at(&mut self, path: std::path::PathBuf) {
+        let path = path.to_string_lossy().to_string();
+        self.state.scene_path = Some(path.clone());
+        self.console_log(LogLevel::Info, "scene", format!("saving {path}"));
+        self.save_scene_to(path);
+    }
+
+    /// Push a line into the editor Console panel so every dialog action is
+    /// visibly logged (no silent failures anywhere in the project flow).
+    pub fn console_log(&mut self, level: LogLevel, target: &str, message: String) {
+        self.state.logs.push(forge_ipc::LogEntry {
+            level,
+            time: crate::panels::clock_hms(),
+            target: target.into(),
+            message,
+        });
+    }
+
+    /// Sandbox UI smoke-test hook: `FORGE_UI_TEST=<dialog>` arms that dialog
+    /// ~2 s after launch so an automated harness can screenshot and complete
+    /// the real menu flow end to end.
+    fn pump_ui_test(&mut self) {
+        if self.ui_test_arm.is_none()
+            || self.dialog.is_some()
+            || self.launched.elapsed() < Duration::from_secs(2)
+        {
+            return;
+        }
+        if let Some(purpose) = self.ui_test_arm.take() {
+            crate::logging::info(&format!("FORGE_UI_TEST: arming dialog {purpose:?}"));
+            self.arm_dialog(purpose);
+        }
     }
 
     /// Record an undo entry and apply its forward (redo) commands.
@@ -862,6 +1091,8 @@ impl eframe::App for BevyForgeApp {
         }
         panels::status_bar(self, ui);
         panels::central(self, ui);
+        self.pump_ui_test();
+        self.pump_file_dialog(&ctx);
         panels::draw_toasts(self, &ctx);
     }
 

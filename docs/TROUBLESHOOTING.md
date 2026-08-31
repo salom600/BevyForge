@@ -44,7 +44,16 @@ Since 0.2.2 editing buttons **always work** (offline document mode). If they
 appear dead on a version *before* 0.2.2, this is always the engine process
 failing to start. The most common causes:
 
-### a) The runtime executable is missing
+### a) **Fixed in 0.2.3 — Project menu dialogs never opened**
+In 0.2.2 the *Project* menu items (New/Open Project, Open/Save Scene As) armed
+a file dialog that was never rendered, so clicking them closed the menu with
+no visible effect — they looked like fake buttons. 0.2.3 renders the dialog,
+routes the picked folder/file (project switching even restarts the engine on
+the new project root), and logs every step to the Console panel
+(`dialog armed` → `picked: …` → `created '…'` / `active: …`). Verify your
+version in the title bar: `BevyForge 0.2.3 · bevy 0.19`.
+
+### b) The runtime executable is missing
 You extracted or moved `bevyforge.exe` **alone** out of the archive, or your
 zip tool skipped it.
 

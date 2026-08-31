@@ -128,8 +128,7 @@ fn menu_file(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
             ui.close();
         }
         if ui.button("Open Scene…").clicked() {
-            app.dialog = Some(DialogPurpose::OpenScene);
-            app.file_dialog.pick_file();
+            app.arm_dialog(DialogPurpose::OpenScene);
             ui.close();
         }
         if ui.button("Save Scene").clicked() {
@@ -137,19 +136,16 @@ fn menu_file(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
             ui.close();
         }
         if ui.button("Save Scene As…").clicked() {
-            app.dialog = Some(DialogPurpose::SaveSceneAs);
-            app.file_dialog.save_file();
+            app.arm_dialog(DialogPurpose::SaveSceneAs);
             ui.close();
         }
         ui.separator();
         if ui.button("Open Project…").clicked() {
-            app.dialog = Some(DialogPurpose::OpenProject);
-            app.file_dialog.pick_directory();
+            app.arm_dialog(DialogPurpose::OpenProject);
             ui.close();
         }
         if ui.button("New Project…").clicked() {
-            app.dialog = Some(DialogPurpose::NewProject);
-            app.file_dialog.pick_directory();
+            app.arm_dialog(DialogPurpose::NewProject);
             ui.close();
         }
         ui.separator();
