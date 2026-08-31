@@ -56,6 +56,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     // Network: attach or spawn.
+    let mut spawn_error: Option<String> = None;
     let net = if let Some(p) = connect_port {
         net::Net::attach(p)?
     } else {
@@ -66,8 +67,9 @@ fn main() -> anyhow::Result<()> {
         ) {
             Ok(n) => n,
             Err(e) => {
-                // Run UI-only with a clear status instead of crashing.
+                // Run UI-only with a clear status + banner instead of crashing.
                 eprintln!("warning: runtime spawn failed: {e:#}");
+                spawn_error = Some(format!("{e:#}"));
                 net::Net::offline()
             }
         }
@@ -92,6 +94,7 @@ fn main() -> anyhow::Result<()> {
                 cc,
                 app_project,
                 Some(net),
+                spawn_error,
                 exit_after,
             )) as Box<dyn eframe::App>)
         }),

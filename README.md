@@ -40,21 +40,40 @@ egui primitives — no icon fonts, no raster assets, DPI-crisp and theme-tintabl
 
 ## GPU compatibility ("runs on any device")
 
-The engine process renders through wgpu and automatically picks the best backend the
-host provides: **Vulkan** on Linux/Windows/Android, **DX12** on Windows, **Metal** on
-macOS. Machines without a modern API can force the OpenGL backend, and VMs / old
-laptops transparently fall back to software rasterizers (lavapipe, llvmpipe, WARP):
+Since **0.2.1** the editor walks a **backend fallback chain** on every start — if the
+engine dies inside wgpu adapter creation the supervisor retries with the next backend
+and only reports failure after all of them, carrying the engine's own error text into
+the red offline banner (no more silent dead buttons):
+
+| Platform | Fallback chain |
+|----------|----------------|
+| Windows  | auto (Vulkan→DX12) → **DX12** → **Vulkan** → **GL** |
+| Linux    | auto (Vulkan) → **Vulkan** → **GL** |
+| macOS    | auto (Metal) → **Metal** |
+
+The engine renders through wgpu (Vulkan / DX12 / Metal / OpenGL ES); VMs, remote
+desktops and old laptops transparently fall back to software rasterizers (lavapipe,
+llvmpipe, WARP). If the engine process dies at runtime the editor respawns it
+automatically with exponential backoff.
 
 ```sh
 bevyforge-runtime --backend vulkan   # force Vulkan
 bevyforge-runtime --backend gl       # force OpenGL (wgpu gles is compiled in)
 bevyforge-runtime --backend dx12     # force Direct3D 12 (Windows)
 FORGE_BACKEND=gl bevyforge           # same via environment variable
+WGPU_BACKENDS=vulkan bevyforge       # raw wgpu override also honoured
 ```
 
 The editor itself uses plain OpenGL 3.2+ (glow), which works on essentially every GPU
 and driver stack, including Mesa software rendering. `PowerPreference::HighPerformance`
-steers adapter selection toward discrete GPUs when several exist.
+steers adapter selection toward discrete GPUs when several exist. The active backend
+and GPU name are shown live in the editor status bar.
+
+**Windows artifacts are fully portable** — the MSVC C runtime is statically linked
+(no VC++ redistributable required); extract the archive and double-click
+`bevyforge.exe`. If anything refuses to start, the editor shows the exact reason and
+a *Retry now* button; see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) (also
+bundled in every artifact).
 
 ## Building
 

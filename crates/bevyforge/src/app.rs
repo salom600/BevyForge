@@ -35,6 +35,23 @@ pub struct BevyForgeApp {
     pub asset_search: String,
     /// Clone of the current egui context (set each `ui` call) for async use.
     pub ui_ctx: Option<egui::Context>,
+    /// TCP port the runtime binds (kept so respawns reuse it).
+    pub runtime_port: u16,
+    /// Why the runtime is not running (spawn/attach failure), shown in the
+    /// offline banner. `None` while connected.
+    pub spawn_error: Option<String>,
+    /// When to attempt the next runtime respawn while offline.
+    pub next_retry: Option<Instant>,
+    /// Exponential backoff between respawn attempts (2 s … 10 s).
+    pub retry_delay: Duration,
+    /// In-flight respawn attempt (spawn runs on a worker thread so a slow or
+    /// broken machine never freezes the editor UI).
+    pub respawn_rx:
+        Option<std::sync::mpsc::Receiver<anyhow::Result<crate::net::Net>>>,
+    /// Throttle for the "action skipped while offline" toast.
+    pub last_offline_warn: Option<Instant>,
+    /// Set when the app is shutting down: suppress auto-respawn.
+    pub closing: bool,
 }
 
 /// An in-flight `cargo check` for the scripts crate.
@@ -63,16 +80,40 @@ pub struct KeyframeDrag {
 }
 
 impl BevyForgeApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, project: Option<Project>, net: Option<Net>, exit_after: Option<f64>) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        project: Option<Project>,
+        net: Option<Net>,
+        spawn_error: Option<String>,
+        exit_after: Option<f64>,
+    ) -> Self {
         crate::theme::install(&cc.egui_ctx);
         let mut state = EditorState::new();
-        state.status_message = if net.is_some() { "Connecting…".into() } else { "No runtime".into() };
+        let offline = net.as_ref().map(|n| n.is_offline()).unwrap_or(true);
+        state.status_message = if offline {
+            "Engine offline — retrying…".into()
+        } else if net.is_some() {
+            "Connecting…".into()
+        } else {
+            "No runtime".into()
+        };
         state.logs.push(forge_ipc::LogEntry {
             level: forge_ipc::LogLevel::Info,
             time: crate::panels::clock_hms(),
             target: "bevyforge".into(),
             message: format!("BevyForge editor {} started", env!("CARGO_PKG_VERSION")),
         });
+        if let Some(reason) = &spawn_error {
+            state.logs.push(forge_ipc::LogEntry {
+                level: forge_ipc::LogLevel::Error,
+                time: crate::panels::clock_hms(),
+                target: "runtime".into(),
+                message: reason.clone(),
+            });
+            state
+                .compile_raw
+                .push(format!("[{}] runtime spawn failed: {reason}", crate::panels::clock_hms()));
+        }
         if let Some(project) = &project {
             state.compile_raw.push(format!(
                 "[{}] Project: {} ({})",
@@ -111,6 +152,13 @@ impl BevyForgeApp {
             hierarchy_search: String::new(),
             asset_search: String::new(),
             ui_ctx: None,
+            runtime_port: forge_ipc::DEFAULT_PORT,
+            next_retry: if offline { Some(Instant::now() + Duration::from_secs(2)) } else { None },
+            retry_delay: Duration::from_secs(2),
+            respawn_rx: None,
+            spawn_error,
+            last_offline_warn: None,
+            closing: false,
         }
     }
 
@@ -119,9 +167,114 @@ impl BevyForgeApp {
     // ------------------------------------------------------------------
 
     pub fn cmd(&mut self, cmd: EditorToRuntime) {
+        if self.net.as_ref().map(|n| n.is_offline()).unwrap_or(true) {
+            // Be honest: the engine is not running, this action does nothing.
+            // Warn at most every 3 s so click storms stay readable.
+            let now = Instant::now();
+            if self
+                .last_offline_warn
+                .map(|t| now.duration_since(t) > Duration::from_secs(3))
+                .unwrap_or(true)
+            {
+                self.last_offline_warn = Some(now);
+                self.state.push_toast(
+                    LogLevel::Warn,
+                    "Engine offline — action skipped (auto-retry active, see banner)",
+                );
+            }
+            return;
+        }
         if let Some(net) = &self.net {
             net.send(cmd);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Runtime lifecycle: respawn while offline, restart on demand
+    // ------------------------------------------------------------------
+
+    /// Attempt a respawn of the runtime when offline (exponential backoff,
+    /// spawn executed on a worker thread so the UI stays responsive).
+    pub fn pump_runtime_lifecycle(&mut self) {
+        if self.closing {
+            return;
+        }
+        let offline = self.net.as_ref().map(|n| n.is_offline()).unwrap_or(true);
+        if !offline {
+            self.next_retry = None;
+            return;
+        }
+
+        // Poll an in-flight respawn attempt.
+        if let Some(rx) = &self.respawn_rx {
+            match rx.try_recv() {
+                Ok(Ok(n)) => {
+                    self.respawn_rx = None;
+                    self.net = Some(n);
+                    self.retry_delay = Duration::from_secs(2);
+                    self.spawn_error = None;
+                    self.state.status_message = "Connecting…".into();
+                    self.state
+                        .push_toast(LogLevel::Info, "Engine started — connecting…");
+                    return;
+                }
+                Ok(Err(e)) => {
+                    self.respawn_rx = None;
+                    let msg = format!("{e:#}");
+                    if self.spawn_error.as_deref() != Some(msg.as_str()) {
+                        self.state.logs.push(forge_ipc::LogEntry {
+                            level: forge_ipc::LogLevel::Error,
+                            time: crate::panels::clock_hms(),
+                            target: "runtime".into(),
+                            message: msg.clone(),
+                        });
+                    }
+                    self.spawn_error = Some(msg);
+                    self.state.status_message = "Engine offline — retrying…".into();
+                    return; // wait for the backoff timer before the next attempt
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => return,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.respawn_rx = None;
+                }
+            }
+        }
+
+        let Some(at) = self.next_retry else { return };
+        if Instant::now() < at {
+            return;
+        }
+        self.next_retry = Some(Instant::now() + self.retry_delay);
+        self.retry_delay = (self.retry_delay * 2).min(Duration::from_secs(10));
+
+        let root = self
+            .project
+            .as_ref()
+            .map(|p| p.root.clone())
+            .unwrap_or_default();
+        let port = self.runtime_port;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(crate::net::Net::spawn_runtime(&root, port));
+        });
+        self.respawn_rx = Some(rx);
+        self.state.status_message = "Engine offline — starting…".into();
+    }
+
+    /// Kill and respawn the runtime (status-bar button / menu action).
+    pub fn restart_runtime(&mut self) {
+        if let Some(net) = &self.net {
+            net.terminate();
+        }
+        self.net = Some(crate::net::Net::offline());
+        self.state.connected = false;
+        self.state.playing = false;
+        self.state.status_message = "Restarting engine…".into();
+        self.spawn_error = None;
+        self.retry_delay = Duration::from_secs(1);
+        self.next_retry = Some(Instant::now() + Duration::from_millis(300));
+        self.state
+            .push_toast(LogLevel::Info, "Restarting the render engine…");
     }
 
     /// Record an undo entry and apply its forward (redo) commands.
@@ -180,6 +333,24 @@ impl BevyForgeApp {
                     self.state.connected = false;
                     self.state.playing = false;
                     self.state.status_message = format!("Runtime exited ({code:?})");
+                    // Crash recovery: swap to offline mode and let the
+                    // lifecycle pump respawn the engine automatically.
+                    if self.closing {
+                        return;
+                    }
+                    if let Some(net) = &self.net {
+                        net.terminate();
+                    }
+                    self.net = Some(crate::net::Net::offline());
+                    self.spawn_error = Some(format!("the render engine exited unexpectedly (code {code:?})"));
+                    self.state.logs.push(forge_ipc::LogEntry {
+                        level: forge_ipc::LogLevel::Error,
+                        time: crate::panels::clock_hms(),
+                        target: "runtime".into(),
+                        message: format!("engine exited (code {code:?}) — respawning"),
+                    });
+                    self.retry_delay = Duration::from_secs(2);
+                    self.next_retry = Some(Instant::now() + Duration::from_secs(2));
                 }
                 NetEvent::RuntimeStdout(line) => {
                     // Runtime console output lands in the Output tab.
@@ -297,6 +468,16 @@ impl BevyForgeApp {
             RuntimeToEditor::Goodbye { reason } => {
                 s.connected = false;
                 s.status_message = format!("Runtime closed — {reason}");
+                // Treat a graceful goodbye as a crash for recovery purposes.
+                if !self.closing {
+                    if let Some(net) = &self.net {
+                        net.terminate();
+                    }
+                    self.net = Some(crate::net::Net::offline());
+                    self.spawn_error = Some(format!("the engine closed the connection ({reason})"));
+                    self.retry_delay = Duration::from_secs(2);
+                    self.next_retry = Some(Instant::now() + Duration::from_secs(2));
+                }
             }
         }
     }
@@ -502,6 +683,7 @@ impl eframe::App for BevyForgeApp {
         // Auto-exit mode (used by validation harnesses).
         if let Some(secs) = self.exit_after {
             if self.launched.elapsed() > Duration::from_secs_f64(secs) {
+                self.closing = true;
                 if let Some(net) = &self.net {
                     net.shutdown();
                 }
@@ -510,6 +692,7 @@ impl eframe::App for BevyForgeApp {
         }
 
         self.pump_network();
+        self.pump_runtime_lifecycle();
         if self.check_requested {
             self.check_requested = false;
             self.start_cargo_check();
@@ -531,6 +714,7 @@ impl eframe::App for BevyForgeApp {
         self.ui_ctx = Some(ctx.clone());
 
         panels::top_menu_bar(self, ui);
+        panels::offline_banner(self, ui);
         if self.state.show_hierarchy {
             panels::hierarchy_panel(self, ui);
         }

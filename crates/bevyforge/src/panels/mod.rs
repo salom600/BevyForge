@@ -7,7 +7,7 @@ pub mod right;
 
 pub use central::central;
 pub use left::{assets_panel, hierarchy_panel};
-pub use menu::{draw_toasts, handle_shortcuts, status_bar, top_menu_bar};
+pub use menu::{draw_toasts, handle_shortcuts, offline_banner, status_bar, top_menu_bar};
 pub use right::{environment_panel, inspector_panel};
 pub use crate::theme::tool_button;
 

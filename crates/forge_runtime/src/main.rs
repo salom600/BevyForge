@@ -75,8 +75,24 @@ fn main() -> anyhow::Result<()> {
     std::fs::create_dir_all("assets/scenes")?;
 
     // Bind the IPC listener and announce the port on stdout (the spawner
-    // parses the FORGE_PORT line).
-    let listener = forge_ipc::listen(port)?;
+    // parses the FORGE_PORT line). A busy port fails FAST with exit code 3 so
+    // the editor's retry loop can pick up as soon as a leftover engine
+    // instance releases it (the engine lingers only briefly after its editor
+    // disconnects).
+    let listener = match forge_ipc::listen(port) {
+        Ok(l) => l,
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            println!("FORGE_PORT_BUSY={port}");
+            eprintln!(
+                "Error: IPC port {port} is already in use — a leftover engine \
+                 instance may still be shutting down. The editor retries automatically."
+            );
+            use std::io::Write as _;
+            let _ = std::io::stdout().flush();
+            std::process::exit(3);
+        }
+        Err(e) => return Err(e.into()),
+    };
     let bound_port = listener.local_addr()?.port();
     println!("FORGE_PORT={bound_port}");
     println!("bevyforge-runtime serving project {}", project_dir.display());

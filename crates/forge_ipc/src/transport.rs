@@ -116,61 +116,101 @@ pub fn connect(port: u16, timeout: std::time::Duration) -> io::Result<Connection
 /// * inbound editor commands arrive on `cmd_tx`
 /// * outbound runtime events leave via `evt_rx`
 ///
-/// Runs detached on its own threads; reconnects automatically when the editor
-/// drops the socket.
+/// Runs detached on its own threads. Reconnects automatically when the editor
+/// drops the socket, but only LINGERS: if no editor connects within
+/// [`LINGER_SECS`] after a disconnect (or [`FIRST_CONNECT_SECS`] after boot),
+/// the whole runtime process exits so no orphan engine keeps holding the IPC
+/// port after the editor died.
 pub fn spawn_relay(
     listener: std::net::TcpListener,
     cmd_tx: crossbeam_channel::Sender<crate::EditorToRuntime>,
     evt_rx: crossbeam_channel::Receiver<crate::RuntimeToEditor>,
 ) {
-    std::thread::spawn(move || loop {
-        let (stream, _peer) = match listener.accept() {
-            Ok(x) => x,
-            Err(_) => return, // listener closed: runtime shutting down
-        };
-        let Ok(conn) = Connection::new(stream) else { continue };
-
-        let cmd_tx = cmd_tx.clone();
-        // recv thread: socket -> cmd channel
-        let read_conn = match conn.stream.try_clone() {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        let mut read_conn = Connection { stream: read_conn };
-        let reader = std::thread::spawn(move || loop {
-            match read_conn.recv() {
-                Ok(Message::ToRuntime(cmd)) => {
-                    if cmd_tx.send(cmd).is_err() {
-                        return;
+    std::thread::spawn(move || {
+        const LINGER_SECS: f64 = 10.0;
+        const FIRST_CONNECT_SECS: f64 = 60.0;
+        let mut idle_since = std::time::Instant::now();
+        let mut first_wait = true;
+        loop {
+            // Poll accept so the linger deadline can be enforced.
+            listener
+                .set_nonblocking(true)
+                .expect("listener nonblocking");
+            match listener.accept() {
+                Ok((stream, _peer)) => {
+                    idle_since = std::time::Instant::now();
+                    first_wait = false;
+                    listener
+                        .set_nonblocking(false)
+                        .expect("listener blocking");
+                    serve_connection(stream, &cmd_tx, &evt_rx);
+                    // Editor disconnected — restart the linger window.
+                    idle_since = std::time::Instant::now();
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    let budget = if first_wait { FIRST_CONNECT_SECS } else { LINGER_SECS };
+                    if idle_since.elapsed().as_secs_f64() > budget {
+                        eprintln!(
+                            "[relay] no editor connected for {budget:.0}s — engine exiting"
+                        );
+                        std::process::exit(0);
                     }
+                    std::thread::sleep(std::time::Duration::from_millis(150));
                 }
-                Ok(_) => { /* wrong direction; ignore */ }
-                Err(e) => {
-                    eprintln!("[relay] reader exit: {e}");
-                    return; // disconnected
-                }
+                Err(_) => return, // listener closed: runtime shutting down
             }
-        });
-
-        // send thread: evt channel -> socket (clone so reconnects keep working)
-        let mut write_conn = conn;
-        let evt_rx = evt_rx.clone();
-        let writer = std::thread::spawn(move || loop {
-            match evt_rx.recv_timeout(std::time::Duration::from_millis(250)) {
-                Ok(evt) => {
-                    if write_conn.send(&Message::ToEditor(evt)).is_err() {
-                        return;
-                    }
-                }
-                Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
-                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
-            }
-        });
-
-        let _ = reader.join();
-        let _ = writer.join();
-        // Editor disconnected — loop and accept again.
+        }
     });
+}
+
+/// Serve one editor connection until the socket drops (blocking).
+fn serve_connection(
+    stream: std::net::TcpStream,
+    cmd_tx: &crossbeam_channel::Sender<crate::EditorToRuntime>,
+    evt_rx: &crossbeam_channel::Receiver<crate::RuntimeToEditor>,
+) {
+    let Ok(conn) = Connection::new(stream) else { return };
+
+    let cmd_tx = cmd_tx.clone();
+    // recv thread: socket -> cmd channel
+    let read_conn = match conn.stream.try_clone() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let mut read_conn = Connection { stream: read_conn };
+    let reader = std::thread::spawn(move || loop {
+        match read_conn.recv() {
+            Ok(Message::ToRuntime(cmd)) => {
+                if cmd_tx.send(cmd).is_err() {
+                    return;
+                }
+            }
+            Ok(_) => { /* wrong direction; ignore */ }
+            Err(e) => {
+                eprintln!("[relay] reader exit: {e}");
+                return; // disconnected
+            }
+        }
+    });
+
+    // send thread: evt channel -> socket (clone so reconnects keep working)
+    let mut write_conn = conn;
+    let evt_rx = evt_rx.clone();
+    let writer = std::thread::spawn(move || loop {
+        match evt_rx.recv_timeout(std::time::Duration::from_millis(250)) {
+            Ok(evt) => {
+                if write_conn.send(&Message::ToEditor(evt)).is_err() {
+                    return;
+                }
+            }
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
+        }
+    });
+
+    let _ = reader.join();
+    let _ = writer.join();
+    // Editor disconnected — caller restarts the linger window.
 }
 
 fn connect_timeout(addr: &str, timeout: std::time::Duration) -> io::Result<TcpStream> {

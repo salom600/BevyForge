@@ -1150,7 +1150,6 @@ mod tests {
     #[test]
     fn ndc_ray_recovers_direction() {
         // Identity VP is not a valid projection; build the same one as above.
-        let fov = 90.0_f32.to_radians();
         let proj = Mat4::from_cols_array([
             1.0, 0.0, 0.0, 0.0, //
             0.0, 1.0, 0.0, 0.0, //

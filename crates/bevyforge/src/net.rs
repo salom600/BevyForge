@@ -13,6 +13,10 @@ pub struct Net {
     pub events: Receiver<NetEvent>,
     pub runtime: Option<std::sync::Arc<std::sync::Mutex<std::process::Child>>>,
     pub attached: bool,
+    /// True in UI-only mode (spawn failed or runtime died): commands are
+    /// dropped and the UI must show the offline banner instead of silently
+    /// pretending buttons work.
+    pub offline: bool,
 }
 
 /// Events surfaced to the UI thread.
@@ -30,13 +34,30 @@ impl Net {
     pub fn offline() -> Net {
         let (cmd_tx, _cmd_rx) = crossbeam_channel::unbounded();
         let (_evt_tx, events) = crossbeam_channel::unbounded();
-        Net { cmd_tx, events, runtime: None, attached: false }
+        Net { cmd_tx, events, runtime: None, attached: false, offline: true }
+    }
+
+    pub fn is_offline(&self) -> bool {
+        self.offline
+    }
+
+    /// Kill the runtime child if we own one (crash recovery / restart path).
+    pub fn terminate(&self) {
+        if let Some(child) = &self.runtime {
+            if let Ok(mut c) = child.lock() {
+                let _ = c.kill();
+            }
+        }
     }
 
     /// Spawn the runtime child process and connect to its IPC port.
+    ///
+    /// The handshake window is generous (45 s) because machines falling back
+    /// to software rendering compile shaders on the CPU at first boot.
     pub fn spawn_runtime(project_dir: &std::path::Path, port: u16) -> anyhow::Result<Net> {
-        let spawner = RuntimeSpawner { binary: None, port };
-        let handle: RuntimeHandle = spawner.spawn(project_dir, std::time::Duration::from_secs(20))?;
+        let spawner = RuntimeSpawner { binary: None, port, ..Default::default() };
+        let handle: RuntimeHandle =
+            spawner.spawn(project_dir, std::time::Duration::from_secs(45))?;
         let child = handle.child;
         let port = handle.port;
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<EditorToRuntime>();
@@ -124,7 +145,7 @@ impl Net {
             }
         });
 
-        Ok(Net { cmd_tx, events: evt_rx, runtime: Some(child), attached: false })
+        Ok(Net { cmd_tx, events: evt_rx, runtime: Some(child), attached: false, offline: false })
     }
 
     /// Attach to an already-running runtime (editor restart scenario).
@@ -159,7 +180,7 @@ impl Net {
                 }
             }
         });
-        Ok(Net { cmd_tx, events: evt_rx, runtime: None, attached: true })
+        Ok(Net { cmd_tx, events: evt_rx, runtime: None, attached: true, offline: false })
     }
 
     /// Non-blocking drain of everything that arrived since last frame.

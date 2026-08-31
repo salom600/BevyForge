@@ -363,6 +363,21 @@ pub fn status_bar(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
                 };
                 ui.label(egui::RichText::new("●").color(dot).small());
                 ui.label(egui::RichText::new(label).small().color(theme::TEXT_DIM));
+                if !app.state.connected {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Restart engine").small().color(theme::YELLOW),
+                            )
+                            .fill(theme::BG_WIDGET)
+                            .stroke(egui::Stroke::new(1.0, theme::YELLOW))
+                            .corner_radius(3),
+                        )
+                        .clicked()
+                    {
+                        app.restart_runtime();
+                    }
+                }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let s = &app.state.stats;
@@ -389,6 +404,75 @@ pub fn status_bar(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
                     ui.separator();
                     ui.label(mono(format!("Entities: {}", s.entity_count)));
                     let _ = crate::panels::clock_hms();
+                });
+            });
+        });
+}
+
+// ---------------------------------------------------------------------------
+// Offline banner — honest, unmissable feedback when the engine is not running
+// ---------------------------------------------------------------------------
+
+/// A red strip directly under the menu bar while the runtime engine is down.
+/// Without this, a failed runtime spawn looks like a full editor with dead
+/// buttons — the exact "fake engine" experience reported on Windows.
+pub fn offline_banner(app: &mut BevyForgeApp, ui: &mut egui::Ui) {
+    let offline = app.net.as_ref().map(|n| n.is_offline()).unwrap_or(true);
+    let attached = app.net.as_ref().map(|n| n.attached).unwrap_or(false);
+    if !offline || attached {
+        return;
+    }
+    egui::Panel::top("offline_banner")
+        .resizable(false)
+        .frame(
+            egui::Frame::new()
+                .fill(theme::RED.gamma_multiply(0.13))
+                .stroke(egui::Stroke::new(1.0, theme::RED))
+                .inner_margin(egui::Margin::symmetric(10, 5)),
+        )
+        .show(ui, |ui| {
+            ui.horizontal_centered(|ui| {
+                let icon = crate::panels::level_icon(forge_ipc::LogLevel::Error);
+                let (icon_rect, _) = ui.allocate_exact_size(egui::vec2(20.0, 18.0), egui::Sense::hover());
+                crate::icons::paint(ui.painter(), icon, icon_rect, theme::RED);
+
+                ui.vertical(|ui| {
+                    ui.set_max_width(ui.available_width() - 220.0);
+                    ui.label(
+                        egui::RichText::new(
+                            "The BevyForge render engine is NOT running — every scene action is disabled.",
+                        )
+                        .strong()
+                        .color(theme::RED),
+                    );
+                    let reason = app
+                        .spawn_error
+                        .clone()
+                        .unwrap_or_else(|| "the engine process could not be started".into());
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Reason: {reason}  ·  auto-retry every few seconds  ·  \
+                             make sure bevyforge-runtime sits next to bevyforge (extract the FULL archive)"
+                        ))
+                        .small()
+                        .color(theme::TEXT),
+                    );
+                });
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Retry now").color(theme::TEXT),
+                            )
+                            .fill(theme::BG_WIDGET_HOVER)
+                            .stroke(egui::Stroke::new(1.0, theme::RED))
+                            .corner_radius(4),
+                        )
+                        .clicked()
+                    {
+                        app.restart_runtime();
+                    }
                 });
             });
         });

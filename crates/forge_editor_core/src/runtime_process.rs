@@ -4,6 +4,17 @@
 //! dir), spawns it with the project path and a requested port, and watches
 //! stdout for the `FORGE_PORT=<n>` line the runtime prints once its IPC
 //! listener is bound. stderr is drained into a ring for crash reporting.
+//!
+//! Windows note: the binary on disk is `bevyforge-runtime.exe`, so every
+//! lookup must go through `std::env::consts::EXE_SUFFIX` — `Path::is_file`
+//! performs no extension aliasing and a bare `bevyforge-runtime` check always
+//! fails on Windows (the "all buttons are dead" bug).
+//!
+//! GPU note: on machines whose drivers ship broken Vulkan/DX12/GL stacks the
+//! runtime dies inside wgpu adapter creation. The supervisor therefore walks a
+//! backend fallback chain (default → dx12 → vulkan → gl on Windows) and only
+//! fails once every backend has been tried, carrying the engine's own error
+//! output back to the editor UI.
 
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -13,6 +24,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
+
+/// Base name of the runtime binary (without platform suffix).
+pub const RUNTIME_BASE: &str = "bevyforge-runtime";
 
 /// A spawned runtime child plus its stdout signal channel.
 pub struct RuntimeHandle {
@@ -37,12 +51,44 @@ pub struct RuntimeSpawner {
     /// Explicit path to the runtime binary; when `None`, search heuristics run.
     pub binary: Option<PathBuf>,
     pub port: u16,
+    /// GPU backend fallback chain, tried in order. `""` = let wgpu decide.
+    /// Each entry is passed to the runtime as `--backend <value>`.
+    pub backends: Vec<String>,
 }
 
 impl Default for RuntimeSpawner {
     fn default() -> Self {
-        Self { binary: None, port: forge_ipc::DEFAULT_PORT }
+        Self {
+            binary: None,
+            port: forge_ipc::DEFAULT_PORT,
+            backends: default_backend_chain(),
+        }
     }
+}
+
+/// Backend fallback chain per platform: the empty spec lets wgpu apply its own
+/// selection; the remaining entries force individual backends so a machine
+/// with exactly one working driver still boots.
+pub fn default_backend_chain() -> Vec<String> {
+    if cfg!(target_os = "windows") {
+        vec!["".into(), "dx12".into(), "vulkan".into(), "gl".into()]
+    } else if cfg!(target_os = "macos") {
+        vec!["".into(), "metal".into()]
+    } else {
+        vec!["".into(), "vulkan".into(), "gl".into()]
+    }
+}
+
+/// Candidate paths for the runtime binary given the editor's directory and a
+/// platform suffix (`""` on Unix, `".exe"` on Windows).
+pub fn candidate_paths_with(exe_dir: &Path, suffix: &str) -> Vec<PathBuf> {
+    let base = format!("{RUNTIME_BASE}{suffix}");
+    vec![
+        exe_dir.join(&base),
+        exe_dir.join(format!("../{base}")),
+        exe_dir.join(format!("../../{base}")),
+        PathBuf::from(&base),
+    ]
 }
 
 impl RuntimeSpawner {
@@ -50,9 +96,9 @@ impl RuntimeSpawner {
     ///
     /// Search order:
     /// 1. explicit override
-    /// 2. same directory as the current executable
-    /// 3. `../bevyforge-runtime` relative to the executable (cargo target dir)
-    /// 4. `bevyforge-runtime` on `$PATH`
+    /// 2. same directory as the current executable (release layout)
+    /// 3. one/two levels up (cargo `target/debug` and `target/release/<profile>` layouts)
+    /// 4. `bevyforge-runtime<EXE_SUFFIX>` on `$PATH`
     pub fn find_binary(&self) -> Result<PathBuf> {
         if let Some(p) = &self.binary {
             if p.is_file() {
@@ -64,30 +110,63 @@ impl RuntimeSpawner {
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_default();
-        let candidates = [
-            exe_dir.join("bevyforge-runtime"),
-            exe_dir.join("../bevyforge-runtime"),
-            PathBuf::from("bevyforge-runtime"),
-        ];
-        for c in candidates {
+        for c in candidate_paths_with(&exe_dir, std::env::consts::EXE_SUFFIX) {
             if c.is_file() {
                 return Ok(c);
             }
         }
-        bail!("bevyforge-runtime binary not found next to editor or on PATH")
+        bail!(
+            "{RUNTIME_BASE}{} not found next to the editor or on PATH.\n\
+             searched: {}\n\
+             fix: extract the FULL BevyForge archive so both executables sit \
+             in the same folder (Windows Defender may also have quarantined it).",
+            std::env::consts::EXE_SUFFIX,
+            candidate_paths_with(&exe_dir, std::env::consts::EXE_SUFFIX)
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     }
 
     /// Spawn the runtime bound to `project_dir` and wait (bounded) for the
-    /// `FORGE_PORT` handshake line.
+    /// `FORGE_PORT` handshake line. Walks the backend fallback chain.
     pub fn spawn(&self, project_dir: &Path, handshake_timeout: Duration) -> Result<RuntimeHandle> {
         let binary = self.find_binary()?;
-        let mut child = Command::new(&binary)
-            .arg("--project")
+        let mut failures: Vec<String> = Vec::new();
+        for backend in &self.backends {
+            match self.try_spawn(&binary, project_dir, backend, handshake_timeout) {
+                Ok(handle) => return Ok(handle),
+                Err(e) => failures.push(format!(
+                    "--backend {}: {e:#}",
+                    if backend.is_empty() { "auto" } else { backend }
+                )),
+            }
+        }
+        bail!(
+            "the render engine failed to start on every GPU backend tried.\n{}",
+            failures.join("\n")
+        )
+    }
+
+    fn try_spawn(
+        &self,
+        binary: &Path,
+        project_dir: &Path,
+        backend: &str,
+        handshake_timeout: Duration,
+    ) -> Result<RuntimeHandle> {
+        let mut cmd = Command::new(binary);
+        cmd.arg("--project")
             .arg(project_dir)
             .arg("--port")
-            .arg(self.port.to_string())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .arg(self.port.to_string());
+        if !backend.is_empty() {
+            cmd.arg("--backend").arg(backend);
+        }
+        cmd.stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = cmd
             .spawn()
             .with_context(|| format!("spawning {}", binary.display()))?;
 
@@ -145,28 +224,55 @@ impl RuntimeSpawner {
             return;
         });
 
-        // Wait for the port handshake.
+        // Wait for the port handshake, collecting output for crash reporting.
         let deadline = std::time::Instant::now() + handshake_timeout;
         let mut port = None;
+        let mut tail: Vec<String> = Vec::new();
+        let mut early_exit: Option<Option<i32>> = None;
         while std::time::Instant::now() < deadline {
             match rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(RuntimeSignal::Port(p)) => {
                     port = Some(p);
                     break;
                 }
-                Ok(_) => continue,
+                Ok(RuntimeSignal::Stdout(l)) => {
+                    if tail.len() >= 14 {
+                        tail.remove(0);
+                    }
+                    tail.push(l);
+                }
+                Ok(RuntimeSignal::Exited(code)) => {
+                    early_exit = Some(code);
+                    break;
+                }
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
         }
-        let Some(port) = port else {
-            if let Ok(mut c) = shared_child.lock() {
-                let _ = c.kill();
-            }
-            bail!("runtime did not announce FORGE_PORT within the handshake window");
-        };
+        if let Some(port) = port {
+            return Ok(RuntimeHandle { child: shared_child, signals: rx, port });
+        }
 
-        Ok(RuntimeHandle { child: shared_child, signals: rx, port })
+        // Failure paths: kill whatever is left and report with engine output.
+        if let Ok(mut c) = shared_child.lock() {
+            let _ = c.kill();
+        }
+        let tail_txt = if tail.is_empty() {
+            String::new()
+        } else {
+            format!("\nengine output:\n  {}", tail.join("\n  "))
+        };
+        match early_exit {
+            Some(code) => bail!(
+                "engine crashed during startup (exit code {code:?}){}",
+                tail_txt
+            ),
+            None => bail!(
+                "engine did not signal startup within {}s{}",
+                handshake_timeout.as_secs(),
+                tail_txt
+            ),
+        }
     }
 }
 
@@ -181,5 +287,33 @@ mod tests {
             ..Default::default()
         };
         assert!(spawner.find_binary().is_err());
+    }
+
+    #[test]
+    fn windows_candidates_include_exe_suffix() {
+        let dir = PathBuf::from("/tmp/fake-exe-dir");
+        let paths = candidate_paths_with(&dir, ".exe");
+        assert!(paths.contains(&dir.join("bevyforge-runtime.exe")));
+        assert!(paths.contains(&dir.join("../bevyforge-runtime.exe")));
+        // bare name must NOT be relied upon when a suffix exists
+        assert!(!paths.contains(&dir.join("bevyforge-runtime")));
+    }
+
+    #[test]
+    fn unix_candidates_have_no_suffix() {
+        let dir = PathBuf::from("/tmp/fake-exe-dir");
+        let paths = candidate_paths_with(&dir, "");
+        assert!(paths.contains(&dir.join("bevyforge-runtime")));
+    }
+
+    #[test]
+    fn default_chain_covers_platform_backends() {
+        let chain = default_backend_chain();
+        assert_eq!(chain.first().map(String::as_str), Some(""));
+        if cfg!(target_os = "windows") {
+            assert!(chain.contains(&"dx12".to_string()));
+            assert!(chain.contains(&"vulkan".to_string()));
+            assert!(chain.contains(&"gl".to_string()));
+        }
     }
 }
